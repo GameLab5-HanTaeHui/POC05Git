@@ -308,7 +308,7 @@ namespace SENTRY
                                                          * OverloadDamageMultiplier);
                 for (int i = 0; i < 3; i++)
                     FireBullet(_currentTarget, dmg);
-                ComboManager.Instance?.OnSentrySkillUsed();
+                SentryComboManager.Instance?.OnSentrySkillUsed();
                 return;
             }
 
@@ -343,7 +343,7 @@ namespace SENTRY
             while (_skillEffect != null && _skillEffect.IsPlaying)
                 yield return null;
 
-            ComboManager.Instance?.OnSentrySkillUsed();
+            SentryComboManager.Instance?.OnSentrySkillUsed();
         }
 
         // ─────────────────────────────────────────

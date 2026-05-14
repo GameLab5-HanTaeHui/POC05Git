@@ -7,40 +7,44 @@ namespace SENTRY
 {
     /// <summary>
     /// 센트리 간 콤보 연계 시스템을 관리하는 싱글턴 매니저.
+    /// (구 ComboManager → SentryComboManager 이름 변경)
     ///
-    /// [변경 사항 - Revision2: 실시간 위치 기반 콤보 포지션]
+    /// [콤보 큐 시스템]
+    /// 게이지가 찰 때마다 발동 가능한 콤보를 Queue에 추가합니다.
+    /// 재생 중이면 대기, 끝나면 자동으로 다음 콤보를 꺼내 실행합니다.
     ///
-    /// 기존 문제:
-    ///   - 콤보 포지션을 Inspector에서 고정 Transform으로 지정했음
-    ///   - 센트리들이 전투 중 실시간으로 이동하기 때문에
-    ///     고정 포지션으로 이동 시 전투 흐름이 부자연스럽고
-    ///     실제 적의 위치와 동떨어진 곳에서 콤보가 발동될 수 있음
+    /// [큐 추가 우선순위 — 게이지 만참 시점]
+    ///   1순위: 3기 생존 + 3콤보 쿨타임 OK → AllThree
+    ///   2순위: 3콤보 불가일 때 → 가능한 2콤보 조합 목록 수집 후 랜덤 1개 선택
+    ///          가능한 조합: 쿨타임 OK + 해당 센트리 2기 모두 생존
+    ///          A (타격+사격) / B (타격+벽) / C (사격+벽)
+    ///   발동 불가 시 큐 미추가 (게이지만 소비)
     ///
-    /// 변경 후:
-    ///   - 콤보 발동 시점의 적 위치와 각 센트리 위치를 기준으로
-    ///     콤보 포지션을 동적으로 계산합니다.
-    ///   - 콤보 연출 포지션 계산 기준:
-    ///       · 집결 중심점: 타겟 적의 현재 위치
-    ///       · 각 센트리는 중심점 기준 오프셋만큼 이동
-    ///       · 오프셋은 배틀 필드(쿼터뷰) 기준 벡터로 설정
-    ///   - Inspector의 고정 포지션 Transform 필드를 제거했습니다.
+    /// [쿨타임 구조 — 4개 개별]
+    ///   _combo3CooldownTimer : 3콤보 전용 공유 1개
+    ///   _comboACooldownTimer : 2콤보A (타격+사격) 개별
+    ///   _comboBCooldownTimer : 2콤보B (타격+벽) 개별
+    ///   _comboCCooldownTimer : 2콤보C (사격+벽) 개별
     ///
-    /// [콤보 포지션 오프셋 설계 (쿼터뷰 기준)]
-    ///   타겟 적 위치를 기준으로:
-    ///   · Strike: 적 바로 앞 (근접 타격)
-    ///   · Shoot:  적에서 일정 거리 후방 (원거리 사격)
-    ///   · Wall:   적 옆 또는 위 (압착/낙하)
+    /// [UI 노출]
+    ///   Combo2CooldownRatio : 가능한 2콤보 중 쿨타임이 가장 짧은 것의 비율 (UI 1개)
+    ///   Combo3CooldownRatio : 3콤보 쿨타임 비율 (UI 1개)
+    ///
+    /// [히어라키 위치]
+    /// --- Managers ---
+    ///   └── SentryComboManager (이 스크립트)
     /// </summary>
-    public class ComboManager : MonoBehaviour
+    public class SentryComboManager : MonoBehaviour
     {
         // ─────────────────────────────────────────
         //  싱글턴
         // ─────────────────────────────────────────
 
-        public static ComboManager Instance { get; private set; }
+        /// <summary>씬 어디서든 SentryComboManager.Instance로 접근합니다.</summary>
+        public static SentryComboManager Instance { get; private set; }
 
         // ─────────────────────────────────────────
-        //  Inspector 노출 필드
+        //  Inspector — 센트리 참조
         // ─────────────────────────────────────────
 
         [Header("센트리 참조")]
@@ -53,6 +57,10 @@ namespace SENTRY
         [Tooltip("벽 센트리")]
         [SerializeField] private WallSentry _wallSentry;
 
+        // ─────────────────────────────────────────
+        //  Inspector — 콤보 게이지 설정
+        // ─────────────────────────────────────────
+
         [Header("콤보 게이지 설정")]
         [Tooltip("콤보 게이지 최대치")]
         [SerializeField] private float _maxComboGauge = 100f;
@@ -63,28 +71,40 @@ namespace SENTRY
         [Tooltip("센트리 스킬 발동 1회당 콤보 게이지 충전량")]
         [SerializeField] private float _comboGaugePerSkill = 15f;
 
-        [Header("콤보 쿨타임")]
-        [Tooltip("3센트리 콤보 쿨타임 (초)")]
+        // ─────────────────────────────────────────
+        //  Inspector — 콤보 쿨타임
+        // ─────────────────────────────────────────
+
+        [Header("콤보 쿨타임 (초)")]
+        [Tooltip("3센트리 콤보 전용 쿨타임 (공유 1개)")]
         [SerializeField] private float _combo3Cooldown = 60f;
 
-        [Tooltip("2센트리 콤보 쿨타임 (초)")]
-        [SerializeField] private float _combo2Cooldown = 25f;
+        [Tooltip("2콤보A (타격+사격) 개별 쿨타임")]
+        [SerializeField] private float _comboACooldown = 25f;
 
-        [Header("콤보 포지션 오프셋 (쿼터뷰 기준, 적 위치 기준 상대 좌표)")]
-        [Tooltip("타격 센트리가 이동할 오프셋.\n" +
-                 "적 바로 앞(근접)에 배치합니다.\n" +
-                 "예) (-1.5f, 0f) = 적의 왼쪽 1.5 유닛")]
+        [Tooltip("2콤보B (타격+벽) 개별 쿨타임")]
+        [SerializeField] private float _comboBCooldown = 25f;
+
+        [Tooltip("2콤보C (사격+벽) 개별 쿨타임")]
+        [SerializeField] private float _comboCCooldown = 25f;
+
+        // ─────────────────────────────────────────
+        //  Inspector — 콤보 포지션 오프셋
+        // ─────────────────────────────────────────
+
+        [Header("콤보 포지션 오프셋 (쿼터뷰, 적 위치 기준 상대 좌표)")]
+        [Tooltip("타격 센트리 오프셋. 적 바로 앞(근접).")]
         [SerializeField] private Vector2 _strikeComboOffset = new Vector2(-1.5f, 0f);
 
-        [Tooltip("사격 센트리가 이동할 오프셋.\n" +
-                 "적에서 후방 거리에 배치합니다.\n" +
-                 "예) (-4f, 0f) = 적의 왼쪽 4 유닛 (원거리)")]
+        [Tooltip("사격 센트리 오프셋. 적 후방(원거리).")]
         [SerializeField] private Vector2 _shootComboOffset = new Vector2(-4f, 0f);
 
-        [Tooltip("벽 센트리가 이동할 오프셋.\n" +
-                 "적 옆에 배치합니다.\n" +
-                 "예) (1f, 0f) = 적의 오른쪽 1 유닛 (압착용)")]
+        [Tooltip("벽 센트리 오프셋. 적 옆(압착/낙하).")]
         [SerializeField] private Vector2 _wallComboOffset = new Vector2(1f, 0f);
+
+        // ─────────────────────────────────────────
+        //  Inspector — 3콤보 전용 설정
+        // ─────────────────────────────────────────
 
         [Header("3콤보 전용 설정")]
         [Tooltip("3콤보 사격 단계 연속 발사 수")]
@@ -96,6 +116,10 @@ namespace SENTRY
         [Tooltip("3콤보 데미지 배율")]
         [SerializeField] private float _combo3DamageMultiplier = 4f;
 
+        // ─────────────────────────────────────────
+        //  Inspector — 2콤보 설정
+        // ─────────────────────────────────────────
+
         [Header("2콤보 설정")]
         [Tooltip("2콤보 데미지 배율")]
         [SerializeField] private float _combo2DamageMultiplier = 2.5f;
@@ -104,31 +128,100 @@ namespace SENTRY
         [SerializeField] private GameObject _piercingBulletPrefab;
 
         // ─────────────────────────────────────────
+        //  콤보 타입 열거형
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// 큐에 저장되어 실행 순서를 보장하는 콤보 종류 열거형.
+        /// </summary>
+        private enum ComboType
+        {
+            /// <summary>3센트리 전원 연계</summary>
+            AllThree,
+            /// <summary>2콤보A: 타격 + 사격</summary>
+            StrikeShoot,
+            /// <summary>2콤보B: 타격 + 벽</summary>
+            StrikeWall,
+            /// <summary>2콤보C: 사격 + 벽</summary>
+            ShootWall
+        }
+
+        // ─────────────────────────────────────────
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
+        /// <summary>현재 콤보 게이지</summary>
         private float _currentComboGauge = 0f;
+
+        /// <summary>콤보 연출 재생 중 여부</summary>
         private bool _isComboPlaying = false;
-        private float _combo3CooldownTimer = 0f;
-        private float _combo2CooldownTimer = 0f;
+
+        /// <summary>배틀 진행 중 여부</summary>
         private bool _isInBattle = false;
+
+        /// <summary>3콤보 쿨타임 타이머</summary>
+        private float _combo3CooldownTimer = 0f;
+
+        /// <summary>2콤보A 쿨타임 타이머</summary>
+        private float _comboACooldownTimer = 0f;
+
+        /// <summary>2콤보B 쿨타임 타이머</summary>
+        private float _comboBCooldownTimer = 0f;
+
+        /// <summary>2콤보C 쿨타임 타이머</summary>
+        private float _comboCCooldownTimer = 0f;
+
+        /// <summary>발동 대기 중인 콤보 타입 큐</summary>
+        private Queue<ComboType> _comboQueue = new Queue<ComboType>();
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
+        /// <summary>현재 콤보 게이지</summary>
         public float ComboGauge => _currentComboGauge;
+
+        /// <summary>콤보 게이지 최대치</summary>
         public float MaxComboGauge => _maxComboGauge;
 
+        /// <summary>
+        /// 3콤보 쿨타임 비율 (0=쿨중 / 1=사용가능).
+        /// UI: 3콤보 전용 쿨타임 바 1개에 연결합니다.
+        /// </summary>
         public float Combo3CooldownRatio =>
             _combo3Cooldown > 0f
                 ? Mathf.Clamp01(1f - (_combo3CooldownTimer / _combo3Cooldown))
                 : 1f;
 
-        public float Combo2CooldownRatio =>
-            _combo2Cooldown > 0f
-                ? Mathf.Clamp01(1f - (_combo2CooldownTimer / _combo2Cooldown))
-                : 1f;
+        /// <summary>
+        /// 2콤보 대표 쿨타임 비율 (0=쿨중 / 1=사용가능).
+        /// A/B/C 중 현재 생존 조합에서 쿨타임이 가장 많이 찬(Ratio가 큰) 것을 대표값으로 반환합니다.
+        /// UI: 2콤보 통합 쿨타임 바 1개에 연결합니다.
+        /// </summary>
+        public float Combo2CooldownRatio
+        {
+            get
+            {
+                bool strikeAlive = _strikeSentry != null && !_strikeSentry.IsKnockedOut;
+                bool shootAlive = _shootSentry != null && !_shootSentry.IsKnockedOut;
+                bool wallAlive = _wallSentry != null && !_wallSentry.IsKnockedOut;
+
+                float best = 0f;
+
+                // 생존 조합에 해당하는 쿨타임 비율만 비교
+                if (strikeAlive && shootAlive)
+                    best = Mathf.Max(best, GetRatio(_comboACooldownTimer, _comboACooldown));
+                if (strikeAlive && wallAlive)
+                    best = Mathf.Max(best, GetRatio(_comboBCooldownTimer, _comboBCooldown));
+                if (shootAlive && wallAlive)
+                    best = Mathf.Max(best, GetRatio(_comboCCooldownTimer, _comboCCooldown));
+
+                return best;
+            }
+        }
+
+        /// <summary>현재 대기 중인 콤보 수 (UI 대기 표시용)</summary>
+        public int QueuedComboCount => _comboQueue.Count;
 
         // ─────────────────────────────────────────
         //  유니티 생명주기
@@ -142,92 +235,191 @@ namespace SENTRY
 
         private void Update()
         {
+            // 4개 쿨타임 타이머 감소
             if (_combo3CooldownTimer > 0f) _combo3CooldownTimer -= Time.deltaTime;
-            if (_combo2CooldownTimer > 0f) _combo2CooldownTimer -= Time.deltaTime;
+            if (_comboACooldownTimer > 0f) _comboACooldownTimer -= Time.deltaTime;
+            if (_comboBCooldownTimer > 0f) _comboBCooldownTimer -= Time.deltaTime;
+            if (_comboCCooldownTimer > 0f) _comboCCooldownTimer -= Time.deltaTime;
         }
 
         // ─────────────────────────────────────────
         //  배틀 상태
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 배틀 시작 시 BattleManager에서 호출합니다.
+        /// 게이지·큐·쿨타임을 초기화합니다.
+        /// </summary>
         public void OnBattleStart()
         {
             _isInBattle = true;
             _currentComboGauge = 0f;
+            _comboQueue.Clear();
+            _combo3CooldownTimer = 0f;
+            _comboACooldownTimer = 0f;
+            _comboBCooldownTimer = 0f;
+            _comboCCooldownTimer = 0f;
+
+            Debug.Log("[SentryComboManager] 배틀 시작 — 초기화 완료");
         }
 
+        /// <summary>
+        /// 배틀 종료 시 BattleManager에서 호출합니다.
+        /// </summary>
         public void OnBattleEnd()
         {
             _isInBattle = false;
+            _comboQueue.Clear();
         }
 
         // ─────────────────────────────────────────
         //  게이지 충전
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 적 처치 시 BattleManager.OnEnemyDied()에서 호출합니다.
+        /// </summary>
         public void OnEnemyKilled()
         {
-            if (!_isInBattle || _isComboPlaying) return;
+            if (!_isInBattle) return;
             ChargeGauge(_comboGaugePerKill);
         }
 
+        /// <summary>
+        /// 센트리 스킬 발동 시 각 SentryType에서 호출합니다.
+        /// </summary>
         public void OnSentrySkillUsed()
         {
-            if (!_isInBattle || _isComboPlaying) return;
+            if (!_isInBattle) return;
             ChargeGauge(_comboGaugePerSkill);
         }
 
+        /// <summary>
+        /// 게이지를 충전하고 최대치 도달 시 TryEnqueueCombo()를 호출합니다.
+        /// </summary>
+        /// <param name="amount">충전량</param>
         private void ChargeGauge(float amount)
         {
             _currentComboGauge = Mathf.Min(_currentComboGauge + amount, _maxComboGauge);
+
             if (_currentComboGauge >= _maxComboGauge)
-                TryTriggerCombo();
+            {
+                _currentComboGauge = 0f;
+                TryEnqueueCombo();
+            }
         }
 
         // ─────────────────────────────────────────
-        //  콤보 발동 판단
+        //  콤보 큐 추가 판단
         // ─────────────────────────────────────────
 
-        private void TryTriggerCombo()
+        /// <summary>
+        /// 게이지가 찰 때마다 호출됩니다.
+        /// 생존 조합과 쿨타임을 확인해 발동 가능한 콤보를 큐에 추가합니다.
+        ///
+        /// [우선순위]
+        ///   1순위: 3기 생존 + 3콤보 쿨타임 OK → AllThree
+        ///   2순위: 3콤보 불가 시 → 가능한 2콤보 조합 수집 후 랜덤 1개 선택
+        ///          (쿨타임 OK + 해당 2기 생존 조합만 후보)
+        ///   발동 불가 시 큐 미추가
+        /// </summary>
+        private void TryEnqueueCombo()
         {
-            if (_isComboPlaying) return;
-
-            Enemy target = FindNearestEnemy();
-            if (target == null) return;
-
             bool strikeAlive = _strikeSentry != null && !_strikeSentry.IsKnockedOut;
             bool shootAlive = _shootSentry != null && !_shootSentry.IsKnockedOut;
             bool wallAlive = _wallSentry != null && !_wallSentry.IsKnockedOut;
 
-            // 3콤보 우선
+            // ── 1순위: 3콤보 ──
             if (strikeAlive && shootAlive && wallAlive && _combo3CooldownTimer <= 0f)
             {
-                _currentComboGauge = 0f;
-                _combo3CooldownTimer = _combo3Cooldown;
-                StartCoroutine(Combo_AllThree(target));
+                _comboQueue.Enqueue(ComboType.AllThree);
+                Debug.Log($"[SentryComboManager] 큐 추가: AllThree (대기 {_comboQueue.Count}개)");
+                TryDequeueAndPlay();
                 return;
             }
 
-            // 2콤보
-            if (_combo2CooldownTimer > 0f) return;
+            // ── 2순위: 2콤보 — 가능한 조합 수집 후 랜덤 선택 ──
+            List<ComboType> candidates = new List<ComboType>();
 
-            if (strikeAlive && shootAlive)
+            if (strikeAlive && shootAlive && _comboACooldownTimer <= 0f)
+                candidates.Add(ComboType.StrikeShoot);
+            if (strikeAlive && wallAlive && _comboBCooldownTimer <= 0f)
+                candidates.Add(ComboType.StrikeWall);
+            if (shootAlive && wallAlive && _comboCCooldownTimer <= 0f)
+                candidates.Add(ComboType.ShootWall);
+
+            if (candidates.Count > 0)
             {
-                _currentComboGauge = 0f;
-                _combo2CooldownTimer = _combo2Cooldown;
-                StartCoroutine(Combo_StrikeShoot(target));
+                // 후보 중 랜덤 1개 선택
+                ComboType chosen = candidates[Random.Range(0, candidates.Count)];
+                _comboQueue.Enqueue(chosen);
+                Debug.Log($"[SentryComboManager] 큐 추가: {chosen} " +
+                          $"(후보 {candidates.Count}개 중 랜덤 선택 / 대기 {_comboQueue.Count}개)");
+                TryDequeueAndPlay();
+                return;
             }
-            else if (strikeAlive && wallAlive)
+
+            Debug.Log("[SentryComboManager] 발동 가능한 콤보 없음 — 게이지만 소비");
+        }
+
+        // ─────────────────────────────────────────
+        //  콤보 큐 실행
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// 큐에서 콤보를 꺼내 실행합니다.
+        /// 콤보 종료 콜백(OnComboFinished)에서도 호출되어 연속 실행을 보장합니다.
+        /// </summary>
+        private void TryDequeueAndPlay()
+        {
+            if (_isComboPlaying || _comboQueue.Count == 0) return;
+
+            Enemy target = FindNearestEnemy();
+            if (target == null)
             {
-                _currentComboGauge = 0f;
-                _combo2CooldownTimer = _combo2Cooldown;
-                StartCoroutine(Combo_StrikeWall(target));
+                _comboQueue.Clear();
+                Debug.Log("[SentryComboManager] 타겟 없음 — 큐 비움");
+                return;
             }
-            else if (shootAlive && wallAlive)
+
+            ComboType next = _comboQueue.Dequeue();
+
+            Debug.Log($"<color=cyan>[SentryComboManager] 실행: {next}" +
+                      $" / 남은 대기 {_comboQueue.Count}개</color>");
+
+            switch (next)
             {
-                _currentComboGauge = 0f;
-                _combo2CooldownTimer = _combo2Cooldown;
-                StartCoroutine(Combo_ShootWall(target));
+                case ComboType.AllThree:
+                    _combo3CooldownTimer = _combo3Cooldown;
+                    StartCoroutine(Combo_AllThree(target));
+                    break;
+                case ComboType.StrikeShoot:
+                    _comboACooldownTimer = _comboACooldown;
+                    StartCoroutine(Combo_StrikeShoot(target));
+                    break;
+                case ComboType.StrikeWall:
+                    _comboBCooldownTimer = _comboBCooldown;
+                    StartCoroutine(Combo_StrikeWall(target));
+                    break;
+                case ComboType.ShootWall:
+                    _comboCCooldownTimer = _comboCCooldown;
+                    StartCoroutine(Combo_ShootWall(target));
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 모든 콤보 코루틴 종료 시 호출합니다.
+        /// 큐에 남은 콤보가 있으면 자동으로 다음 콤보를 실행합니다.
+        /// </summary>
+        private void OnComboFinished()
+        {
+            _isComboPlaying = false;
+
+            if (_comboQueue.Count > 0)
+            {
+                Debug.Log($"[SentryComboManager] 다음 콤보 실행 준비 (대기 {_comboQueue.Count}개)");
+                TryDequeueAndPlay();
             }
         }
 
@@ -237,27 +429,25 @@ namespace SENTRY
 
         /// <summary>
         /// 타겟 적의 현재 위치를 기준으로 각 센트리의 콤보 집결 위치를 계산합니다.
-        /// 전투 중 적의 위치가 항상 바뀌므로 콤보 발동 시점에 매번 새로 계산합니다.
+        /// 콤보 발동 시점에 매번 새로 계산합니다.
         /// </summary>
         /// <param name="target">콤보 대상 적</param>
         /// <returns>Strike / Shoot / Wall 콤보 위치 (월드 좌표)</returns>
         private (Vector3 strike, Vector3 shoot, Vector3 wall) CalcComboPositions(Enemy target)
         {
             Vector3 basePos = target.transform.position;
-
-            // 적 위치를 기준으로 오프셋을 더해 각 센트리 위치를 계산
-            // 오프셋은 쿼터뷰 기준 (X: 좌우, Y: 상하 원근감)
-            Vector3 strikePos = basePos + (Vector3)_strikeComboOffset;
-            Vector3 shootPos = basePos + (Vector3)_shootComboOffset;
-            Vector3 wallPos = basePos + (Vector3)_wallComboOffset;
-
-            return (strikePos, shootPos, wallPos);
+            return (
+                basePos + (Vector3)_strikeComboOffset,
+                basePos + (Vector3)_shootComboOffset,
+                basePos + (Vector3)_wallComboOffset
+            );
         }
 
         // ─────────────────────────────────────────
-        //  헬퍼: 가장 가까운 적 탐색
+        //  헬퍼
         // ─────────────────────────────────────────
 
+        /// <summary>씬 내 생존 중인 가장 가까운 적을 반환합니다.</summary>
         private Enemy FindNearestEnemy()
         {
             Enemy[] enemies = FindObjectsByType<Enemy>(FindObjectsSortMode.None);
@@ -267,38 +457,23 @@ namespace SENTRY
             float minDist = float.MaxValue;
             foreach (Enemy e in enemies)
             {
+                if (e.IsDead) continue;
                 float d = Vector3.Distance(transform.position, e.transform.position);
                 if (d < minDist) { minDist = d; nearest = e; }
             }
             return nearest;
         }
 
-        // ─────────────────────────────────────────
-        //  헬퍼: 무적 ON / OFF
-        // ─────────────────────────────────────────
-
+        /// <summary>지정 센트리들의 무적 상태를 일괄 설정합니다.</summary>
         private void SetInvincible(bool on, params SentryBase[] sentries)
         {
             foreach (var s in sentries)
                 if (s != null) s.SetInvincible(on);
         }
 
-        // ─────────────────────────────────────────
-        //  헬퍼: 포메이션 복귀 (배틀 종료 후 탐색 필드 복귀와 다름)
-        //  콤보 종료 후 전투 위치로 되돌아가는 것
-        //  → 현재 전투 중이므로 전투 AI가 바로 이동을 재개하면 됨
-        //  → 별도 위치 복귀 불필요 (AI가 자율 이동)
-        // ─────────────────────────────────────────
-
-        /// <summary>
-        /// 콤보 종료 후 센트리를 콤보 직전 위치로 복귀시킵니다.
-        /// 콤보 중 이동한 거리만큼 원래 전투 위치 근처로 돌아갑니다.
-        /// 이후 전투 AI가 다시 자율적으로 움직입니다.
-        /// </summary>
+        /// <summary>콤보 종료 후 센트리를 콤보 직전 위치로 복귀시킵니다.</summary>
         private IEnumerator ReturnFromCombo(
-            SentryBase sentry,
-            Vector3 preComboPosition,
-            float duration = 0.5f)
+            SentryBase sentry, Vector3 preComboPosition, float duration = 0.5f)
         {
             if (sentry == null) yield break;
             yield return sentry.transform
@@ -307,74 +482,60 @@ namespace SENTRY
                 .WaitForCompletion();
         }
 
+        /// <summary>쿨타임 타이머와 최대치로 비율(0~1)을 계산합니다.</summary>
+        private float GetRatio(float timer, float max) =>
+            max > 0f ? Mathf.Clamp01(1f - (timer / max)) : 1f;
+
         // ─────────────────────────────────────────
         //  2콤보 A: 타격 + 사격
         // ─────────────────────────────────────────
 
         /// <summary>
         /// [2콤보 A] 타격 + 사격.
-        /// 콤보 발동 시점의 적 위치를 기준으로 집결 위치를 동적 계산합니다.
+        /// 타격 센트리가 사격 센트리 총구를 쳐 관통탄을 발사합니다.
         /// </summary>
         private IEnumerator Combo_StrikeShoot(Enemy target)
         {
             _isComboPlaying = true;
             Debug.Log("<color=cyan>[2콤보 A] 타격 + 사격!</color>");
 
-            // 콤보 전 현재 위치 저장 (복귀용)
             Vector3 strikePrePos = _strikeSentry.transform.position;
             Vector3 shootPrePos = _shootSentry.transform.position;
 
-            // 무적 ON + 추종 중단
             SetInvincible(true, _strikeSentry, _shootSentry);
             _strikeSentry.StopFollowing();
             _shootSentry.StopFollowing();
 
-            // ── 적 위치 기준 콤보 포지션 동적 계산 ──
             var (strikeComboPos, shootComboPos, _) = CalcComboPositions(target);
 
-            // 집결 이동
             _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
             yield return _shootSentry.transform
-                .DOMove(shootComboPos, 0.5f)
-                .SetEase(Ease.OutBack)
-                .WaitForCompletion();
+                .DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
 
             yield return new WaitForSeconds(0.2f);
 
-            // 타격 센트리 → 사격 센트리 총구 타격 모션
             Vector3 impactPoint = _shootSentry.transform.position + Vector3.right * 0.4f;
-
             yield return _strikeSentry.transform
-                .DOMove(impactPoint, 0.1f)
-                .SetEase(Ease.InExpo)
-                .WaitForCompletion();
+                .DOMove(impactPoint, 0.1f).SetEase(Ease.InExpo).WaitForCompletion();
 
             _strikeSentry.transform.DOShakePosition(0.15f, 0.25f, 15, 90f);
             _shootSentry.transform.DOShakePosition(0.2f, 0.2f, 12, 90f);
 
             yield return new WaitForSeconds(0.1f);
 
-            // 관통탄 발사
             if (target != null && _piercingBulletPrefab != null)
             {
                 int comboDamage = Mathf.RoundToInt(20 * _combo2DamageMultiplier);
                 GameObject bulletObj = Instantiate(
-                    _piercingBulletPrefab,
-                    _shootSentry.transform.position,
-                    Quaternion.identity);
+                    _piercingBulletPrefab, _shootSentry.transform.position, Quaternion.identity);
 
                 SentryPiercingBullet pb = bulletObj.GetComponent<SentryPiercingBullet>();
-                if (pb != null)
-                {
-                    pb.damage = comboDamage;
-                    pb.Setup(target.transform);
-                }
+                if (pb != null) { pb.damage = comboDamage; pb.Setup(target.transform); }
             }
 
             _shootSentry.transform.DOPunchPosition(Vector3.left * 0.35f, 0.15f, 8, 0.5f);
             yield return new WaitForSeconds(0.4f);
 
-            // 콤보 전 위치로 복귀 → AI 재개
             yield return StartCoroutine(ReturnFromCombo(_strikeSentry, strikePrePos));
             yield return StartCoroutine(ReturnFromCombo(_shootSentry, shootPrePos));
 
@@ -382,14 +543,18 @@ namespace SENTRY
             _strikeSentry.StartFollowing();
             _shootSentry.StartFollowing();
 
-            _isComboPlaying = false;
             Debug.Log("[2콤보 A] 종료");
+            OnComboFinished();
         }
 
         // ─────────────────────────────────────────
         //  2콤보 B: 타격 + 벽
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// [2콤보 B] 타격 + 벽.
+        /// 타격 센트리가 벽 센트리를 쳐내 고속 돌진 압착 공격을 합니다.
+        /// </summary>
         private IEnumerator Combo_StrikeWall(Enemy target)
         {
             _isComboPlaying = true;
@@ -406,31 +571,22 @@ namespace SENTRY
 
             _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
             yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.5f)
-                .SetEase(Ease.OutBack)
-                .WaitForCompletion();
+                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
 
             yield return new WaitForSeconds(0.2f);
 
-            // 타격 → 벽 방향 강타
             Vector3 hitPoint = _wallSentry.transform.position + Vector3.left * 0.3f;
-
             yield return _strikeSentry.transform
-                .DOMove(hitPoint, 0.1f)
-                .SetEase(Ease.InExpo)
-                .WaitForCompletion();
+                .DOMove(hitPoint, 0.1f).SetEase(Ease.InExpo).WaitForCompletion();
 
             _strikeSentry.transform.DOShakePosition(0.2f, 0.3f, 15, 90f);
-
             yield return new WaitForSeconds(0.08f);
 
-            // 벽 센트리 고속 돌진 → 압착
             if (target != null)
             {
                 yield return _wallSentry.transform
                     .DOMove(target.transform.position, 0.2f)
-                    .SetEase(Ease.InQuart)
-                    .WaitForCompletion();
+                    .SetEase(Ease.InQuart).WaitForCompletion();
 
                 int comboDamage = Mathf.RoundToInt(15 * _combo2DamageMultiplier);
                 target.TakeDamage(comboDamage, HitType.Strike, _wallSentry.transform.position);
@@ -448,14 +604,18 @@ namespace SENTRY
             _strikeSentry.StartFollowing();
             _wallSentry.StartFollowing();
 
-            _isComboPlaying = false;
             Debug.Log("[2콤보 B] 종료");
+            OnComboFinished();
         }
 
         // ─────────────────────────────────────────
         //  2콤보 C: 사격 + 벽
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// [2콤보 C] 사격 + 벽.
+        /// 사격 후 벽 센트리가 하늘에서 낙하 압착합니다.
+        /// </summary>
         private IEnumerator Combo_ShootWall(Enemy target)
         {
             _isComboPlaying = true;
@@ -472,13 +632,10 @@ namespace SENTRY
 
             _shootSentry.transform.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack);
             yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.5f)
-                .SetEase(Ease.OutBack)
-                .WaitForCompletion();
+                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
 
             yield return new WaitForSeconds(0.2f);
 
-            // 사격 2발
             if (target != null)
             {
                 int comboDamage = Mathf.RoundToInt(20 * _combo2DamageMultiplier);
@@ -492,7 +649,6 @@ namespace SENTRY
 
             yield return new WaitForSeconds(0.15f);
 
-            // 벽 센트리 하늘 → 낙하 압착
             if (target != null)
             {
                 Vector3 skyPos = target.transform.position + Vector3.up * 5f;
@@ -504,8 +660,7 @@ namespace SENTRY
 
                 yield return _wallSentry.transform
                     .DOMove(target.transform.position, 0.22f)
-                    .SetEase(Ease.InQuart)
-                    .WaitForCompletion();
+                    .SetEase(Ease.InQuart).WaitForCompletion();
 
                 int wallDamage = Mathf.RoundToInt(15 * _combo2DamageMultiplier);
                 target.TakeDamage(wallDamage, HitType.Strike, _wallSentry.transform.position);
@@ -523,20 +678,23 @@ namespace SENTRY
             _shootSentry.StartFollowing();
             _wallSentry.StartFollowing();
 
-            _isComboPlaying = false;
             Debug.Log("[2콤보 C] 종료");
+            OnComboFinished();
         }
 
         // ─────────────────────────────────────────
         //  3콤보: 전원 연계
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// [3콤보] 전원 연계.
+        /// 타격이 날림 → 벽이 붙잡음 → 사격 연발 → 최종 밀치기
+        /// </summary>
         private IEnumerator Combo_AllThree(Enemy target)
         {
             _isComboPlaying = true;
             Debug.Log("<color=yellow>[3콤보] 전원 연계 발동!</color>");
 
-            // 콤보 전 위치 저장
             Vector3 strikePrePos = _strikeSentry.transform.position;
             Vector3 shootPrePos = _shootSentry.transform.position;
             Vector3 wallPrePos = _wallSentry.transform.position;
@@ -546,60 +704,43 @@ namespace SENTRY
             _shootSentry.StopFollowing();
             _wallSentry.StopFollowing();
 
-            // ── 적 위치 기준 동적 포지션 계산 ──
             var (strikeComboPos, shootComboPos, wallComboPos) = CalcComboPositions(target);
 
-            // 시간차 집결
-            _strikeSentry.transform.DOMove(strikeComboPos, 0.6f).SetEase(Ease.OutBack);
-            yield return new WaitForSeconds(0.1f);
-            _shootSentry.transform.DOMove(shootComboPos, 0.6f).SetEase(Ease.OutBack);
-            yield return new WaitForSeconds(0.1f);
+            _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
+            _shootSentry.transform.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack);
             yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.6f)
-                .SetEase(Ease.OutBack)
-                .WaitForCompletion();
+                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
 
-            yield return new WaitForSeconds(0.3f);
+            yield return new WaitForSeconds(0.2f);
 
-            if (target == null)
-            {
-                yield return StartCoroutine(EndCombo_AllThree(
-                    strikePrePos, shootPrePos, wallPrePos));
-                yield break;
-            }
+            int combo3Damage = Mathf.RoundToInt(20 * _combo3DamageMultiplier);
 
-            // 타격 돌진 + 날리기
+            // 1단계: 타격 → 날리기
             yield return _strikeSentry.transform
                 .DOMove(target.transform.position + Vector3.left * 0.3f, 0.12f)
-                .SetEase(Ease.InExpo)
-                .WaitForCompletion();
+                .SetEase(Ease.InExpo).WaitForCompletion();
 
-            int combo3Damage = Mathf.RoundToInt(30 * _combo3DamageMultiplier);
-            target.TakeDamage(combo3Damage / 3, HitType.Strike, _strikeSentry.transform.position);
+            if (target != null)
+                target.TakeDamage(combo3Damage / 4, HitType.Strike, _strikeSentry.transform.position);
+
             _strikeSentry.transform.DOShakePosition(0.2f, 0.3f, 15, 90f);
+            yield return new WaitForSeconds(0.15f);
 
-            yield return new WaitForSeconds(0.1f);
+            // 2단계: 벽 센트리 → 붙잡기
+            Rigidbody2D enemyRb = target != null ? target.GetComponent<Rigidbody2D>() : null;
 
-            // 적을 벽 센트리 위치로 DOMove (키네마틱 처리)
-            Rigidbody2D enemyRb = target.GetComponent<Rigidbody2D>();
-            if (enemyRb != null) enemyRb.bodyType = RigidbodyType2D.Kinematic;
+            if (target != null)
+            {
+                yield return _wallSentry.transform
+                    .DOMove(target.transform.position + Vector3.right * 0.5f, 0.18f)
+                    .SetEase(Ease.InQuad).WaitForCompletion();
 
-            yield return target.transform
-                .DOMove(wallComboPos + Vector3.left * 0.5f, 0.3f)
-                .SetEase(Ease.InQuart)
-                .WaitForCompletion();
-
-            // 타격 원위치 (콤보 전 위치 근처)
-            _strikeSentry.transform.DOMove(strikeComboPos, 0.2f).SetEase(Ease.OutQuad);
-
-            // 벽 붙잡기 연출
-            _wallSentry.transform.DOPunchScale(Vector3.one * 0.4f, 0.25f, 6, 0.5f);
-            _wallSentry.transform.DOShakePosition(0.2f, 0.15f, 10, 90f);
-            target.TakeDamage(combo3Damage / 3, HitType.Strike, _wallSentry.transform.position);
+                _wallSentry.transform.DOShakePosition(0.2f, 0.25f, 12, 90f);
+            }
 
             yield return new WaitForSeconds(0.3f);
 
-            // 사격 연속 발사
+            // 3단계: 사격 연속 발사
             int shootDamage = Mathf.RoundToInt(20 * _combo3DamageMultiplier);
             for (int i = 0; i < _combo3BulletCount; i++)
             {
@@ -612,7 +753,7 @@ namespace SENTRY
 
             yield return new WaitForSeconds(0.2f);
 
-            // 최종 밀치기
+            // 4단계: 최종 밀치기
             if (target != null)
             {
                 target.TakeDamage(combo3Damage / 3, HitType.Strike, _wallSentry.transform.position);
@@ -628,31 +769,19 @@ namespace SENTRY
             _wallSentry.transform.DOShakePosition(0.3f, 0.45f, 20, 90f);
             yield return new WaitForSeconds(0.5f);
 
-            yield return StartCoroutine(EndCombo_AllThree(
-                strikePrePos, shootPrePos, wallPrePos));
-        }
-
-        /// <summary>3콤보 종료 공통 정리: 콤보 전 위치 복귀 + 무적 해제 + AI 재개</summary>
-        private IEnumerator EndCombo_AllThree(
-            Vector3 strikePrePos,
-            Vector3 shootPrePos,
-            Vector3 wallPrePos)
-        {
-            // 세 센트리 동시 복귀
+            // 복귀
             _strikeSentry.transform.DOMove(strikePrePos, 0.6f).SetEase(Ease.OutElastic);
             _shootSentry.transform.DOMove(shootPrePos, 0.6f).SetEase(Ease.OutElastic);
             yield return _wallSentry.transform
-                .DOMove(wallPrePos, 0.6f)
-                .SetEase(Ease.OutElastic)
-                .WaitForCompletion();
+                .DOMove(wallPrePos, 0.6f).SetEase(Ease.OutElastic).WaitForCompletion();
 
             SetInvincible(false, _strikeSentry, _shootSentry, _wallSentry);
             _strikeSentry.StartFollowing();
             _shootSentry.StartFollowing();
             _wallSentry.StartFollowing();
 
-            _isComboPlaying = false;
             Debug.Log("[3콤보] 전원 연계 종료");
+            OnComboFinished();
         }
     }
 }

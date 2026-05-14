@@ -91,7 +91,7 @@ namespace SENTRY
             if (_playerTransform != null && _battlePlayerSpawnPoint != null)
                 _playerTransform.position = _battlePlayerSpawnPoint.position;
             yield return new WaitForSeconds(_blackoutHoldDuration);
-            UIManager.Instance?.SetBattleHudActive(true);
+            BattleUIManager.Instance?.SetBattleHudActive(true);
             yield return FadeTo(0f);
             Debug.Log("[FieldManager] 배틀 필드 전환 완료 (2D -> 2.5D 쿼터뷰)");
         }
@@ -106,7 +106,7 @@ namespace SENTRY
         private IEnumerator ReturnToFieldRoutine(
             Transform strike, Transform shoot, Transform wall)
         {
-            UIManager.Instance?.SetBattleHudActive(false);
+            BattleUIManager.Instance?.SetBattleHudActive(false);
             yield return FadeTo(1f);
             if (_battleFieldRoot != null) _battleFieldRoot.SetActive(false);
             if (_explorationFieldRoot != null) _explorationFieldRoot.SetActive(true);

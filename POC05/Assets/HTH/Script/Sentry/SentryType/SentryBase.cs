@@ -575,7 +575,7 @@ namespace SENTRY
                             _spriteRenderer.color = Color.white;
                     });
 
-            UIManager.Instance?.PlayLevelUpEffect(_sentryName, _currentLevel);
+            BattleUIManager.Instance?.PlayLevelUpEffect(_sentryName, _currentLevel);
             Debug.Log($"<color=yellow>[{_sentryName} 레벨업!]</color> Lv.{_currentLevel}");
         }
     }

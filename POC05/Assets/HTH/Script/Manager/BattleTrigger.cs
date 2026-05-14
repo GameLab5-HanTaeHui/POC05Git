@@ -182,7 +182,7 @@ namespace SENTRY
         /// </summary>
         private void ShowEncounterPanel()
         {
-            UIManager.Instance?.ShowEncounterPanel(_encounterData, this);
+            BattleUIManager.Instance?.ShowEncounterPanel(_encounterData, this);
         }
 
         // ─────────────────────────────────────────
@@ -198,7 +198,7 @@ namespace SENTRY
             _waitingForChoice = false;
             _triggered        = true;
 
-            UIManager.Instance?.HideEncounterPanel();
+            BattleUIManager.Instance?.HideEncounterPanel();
             TriggerBattle(_pendingPlayer);
         }
 
@@ -211,7 +211,7 @@ namespace SENTRY
             if (!_waitingForChoice) return;
             _waitingForChoice = false;
 
-            UIManager.Instance?.HideEncounterPanel();
+            BattleUIManager.Instance?.HideEncounterPanel();
 
             Debug.Log($"[BattleTrigger] {gameObject.name} — 도망 선택");
 

@@ -1,15 +1,15 @@
 # SENTRY — 개발 세션 전체 기록
 
-> **마지막 갱신:** 2026-05-14  
-> **엔진:** Unity (C#) · DOTween · Cinemachine  
+> **마지막 갱신:** 2026-05-14
+> **엔진:** Unity (C#) · DOTween · Cinemachine
 > **네임스페이스:** `SENTRY`
 
 ---
 
 ## 🎮 게임 프롬프트 (기획 원문)
 
-> 소환수 키우기 게임 POC  
-> DOTween을 적극 사용해서 모션 연출을 만들어도 된다.  
+> 소환수 키우기 게임 POC
+> DOTween을 적극 사용해서 모션 연출을 만들어도 된다.
 > 매트로 배니아 형식의 게임 기준으로 3가지 타입의 센트리를 키워 나아가야 한다.
 
 ### 센트리 종류
@@ -49,17 +49,17 @@
 
 #### 콤보 게이지 쿨타임
 - 3 센트리 콤보: **1분** (우선권 가짐)
-- 2 센트리 콤보: **20~30초**
+- 2 센트리 콤보: **20~30초** (A/B/C 개별 쿨타임)
 
 #### 2 센트리 콤보 예시
 | 조합 | 연출 |
 |------|------|
-| 타격 + 사격 | 타격 센트리가 사격 센트리의 실린더를 쳐 매우 빠른 탄을 발사 |
-| 타격 + 벽   | 타격 센트리가 벽 센트리를 쳐내 배틀 필드 벽까지 밀어 압착 공격 |
-| 사격 + 벽   | 적을 사격하고 벽 센트리가 하늘에서 낙하 공격 |
+| 타격 + 사격 (A) | 타격 센트리가 사격 센트리의 실린더를 쳐 매우 빠른 탄을 발사 |
+| 타격 + 벽 (B)   | 타격 센트리가 벽 센트리를 쳐내 배틀 필드 벽까지 밀어 압착 공격 |
+| 사격 + 벽 (C)   | 적을 사격하고 벽 센트리가 하늘에서 낙하 공격 |
 
 #### 3 센트리 콤보
-> 타격 센트리가 적을 벽 센트리에게 날려 벽 센트리가 붙잡고,  
+> 타격 센트리가 적을 벽 센트리에게 날려 벽 센트리가 붙잡고,
 > 사격 센트리가 무수한 연발 공격을 퍼붓는다.
 
 ---
@@ -69,31 +69,40 @@
 ```
 Assets/HTH/
 ├── Manager/
-│   ├── GameManager.cs          — 게임 전체 흐름 (씬 전환, 게임오버/클리어)
-│   ├── FieldManager.cs         — 탐색↔배틀 필드 전환 + Cinemachine VCam 제어
-│   ├── BattleManager.cs        — 배틀 시작/종료, 킬 카운트 판정
-│   ├── BattleTrigger.cs        — 탐색 필드 적 배회 + 플레이어 접촉 시 배틀 트리거
-│   ├── ComboManager.cs         — 2/3 센트리 콤보 연계 시스템
-│   ├── EnemySpawner.cs         — BattleEncounterDataSO 기반 적 순차 소환
-│   └── UIManager.cs            — HUD (센트리 HP/EXP, 콤보 게이지, 킬 카운트)
+│   ├── GameManager.cs              — 게임 전체 흐름 (씬 전환, 게임오버/클리어)
+│   ├── FieldManager.cs             — 탐색↔배틀 필드 전환 + Cinemachine VCam 제어
+│   ├── BattleManager.cs            — 배틀 시작/종료, 킬 카운트 판정
+│   ├── BattleTrigger.cs            — 탐색 필드 적 배회 + 플레이어 접촉 시 배틀 트리거
+│   ├── SentryComboManager.cs       — 2/3 센트리 콤보 연계 시스템 (구 ComboManager)
+│   ├── EnemyComboManager.cs        — 적 콤보 순번 AI 제어 (구 EnemyComboGroup)
+│   ├── EnemySpawner.cs             — BattleEncounterDataSO 기반 적 순차 소환
+│   ├── BattleUIManager.cs          — UI 조율자 (구 UIManager)
+│   ├── PlayerBattleUIManager.cs    — 센트리 HUD / 능력 HUD / 콤보 HUD 전담
+│   └── EnemyBattleUIManager.cs     — 적 캐릭터 HUD 전담 (3슬롯 고정)
+│
+├── UI/
+│   └── BattleUIButton.cs           — IPointer 호버/클릭 연출 버튼 컴포넌트
 │
 ├── Sentry/
 │   ├── SentryType/
-│   │   ├── SentryBase.cs       — 모든 센트리의 공통 기반 클래스
-│   │   ├── StrikeSentry.cs     — 타격 센트리
-│   │   ├── ShootSentry.cs      — 사격 센트리
-│   │   └── WallSentry.cs       — 벽 센트리
+│   │   ├── SentryBase.cs           — 모든 센트리의 공통 기반 클래스
+│   │   ├── StrikeSentry.cs         — 타격 센트리
+│   │   ├── ShootSentry.cs          — 사격 센트리
+│   │   └── WallSentry.cs           — 벽 센트리
 │   └── Effect/
-│       ├── SkillEffectStrike.cs  — 타격 스킬 2연타 연출
-│       ├── SkillEffectShoot.cs   — 사격 스킬 3연발 + 레이저 조준선 연출
-│       └── SkillEffectWall.cs    — 벽 스킬 강한 밀치기 + 기절 연출
+│       ├── SkillEffectStrike.cs    — 타격 스킬 2연타 연출
+│       ├── SkillEffectShoot.cs     — 사격 스킬 3연발 + 레이저 조준선 연출
+│       └── SkillEffectWall.cs      — 벽 스킬 강한 밀치기 + 기절 연출
+│
+├── Enemy/
+│   └── Enemy.cs                    — 적 캐릭터 (Level 프로퍼티 추가, HP바 UI 제거)
 │
 ├── Player/
-│   └── PlayerAbility.cs        — 플레이어 특수 능력 (목표 지정·긴급 수리·과부하)
+│   └── PlayerAbility.cs            — 플레이어 특수 능력 (목표 지정·긴급 수리·과부하)
 │
 └── DATA/
-    ├── BattleEncounterDataSO.cs — 배틀 인카운터 구성 ScriptableObject
-    └── SentryGrowthDataSO.cs   — 센트리 레벨업 성장 데이터 ScriptableObject
+    ├── BattleEncounterDataSO.cs    — 배틀 인카운터 구성 SO (comboCount 필드 추가)
+    └── SentryGrowthDataSO.cs       — 센트리 레벨업 성장 데이터 ScriptableObject
 ```
 
 ---
@@ -104,30 +113,45 @@ Assets/HTH/
 [Scene Root]
 ├── --- Managers ---
 │   ├── GameManager
-│   ├── FieldManager        ← 탐색↔배틀 전환 총괄
+│   ├── FieldManager            ← 탐색↔배틀 전환 총괄
 │   ├── BattleManager
-│   ├── ComboManager
-│   └── UIManager
+│   ├── SentryComboManager      ← 구 ComboManager
+│   ├── EnemyComboManager       ← 적 콤보 순번 AI
+│   ├── BattleUIManager         ← 구 UIManager (조율자)
+│   ├── PlayerBattleUIManager   ← 센트리 HUD 전담
+│   └── EnemyBattleUIManager    ← 적 HUD 전담
 │
-├── Main Camera             ← CinemachineBrain 부착
-├── ExplorationVirtualCamera  ← 탐색용 VCam (Follow/LookAt: Player)
-└── BattleVirtualCamera       ← 배틀용 VCam (고정 쿼터뷰 앵글)
+├── Main Camera                 ← CinemachineBrain 부착
+├── ExplorationVirtualCamera    ← 탐색용 VCam (Follow/LookAt: Player)
+└── BattleVirtualCamera         ← 배틀용 VCam (고정 쿼터뷰 앵글)
 │
-├── ExplorationField        ← 2D 사이드뷰 루트 (평소 활성)
+├── ExplorationField            ← 2D 사이드뷰 루트 (평소 활성)
 │   ├── Player
 │   ├── Sentries
 │   │   ├── StrikeSentry
 │   │   ├── ShootSentry
 │   │   └── WallSentry
-│   └── EncounterEnemy_N   ← BattleTrigger 부착
+│   └── EncounterEnemy_N        ← BattleTrigger 부착
 │
-└── BattleField             ← 2.5D 쿼터뷰 루트 (평소 비활성)
+└── BattleField                 ← 2.5D 쿼터뷰 루트 (평소 비활성)
     ├── EnemySpawner
     │   └── SpawnPoint_1~N
+    ├── EnemyComboManager
     └── SentryBattleSpawnPoints
         ├── StrikeSpawn
         ├── ShootSpawn
         └── WallSpawn
+
+Canvas (Screen Space - Overlay)
+  ├── SentryHUDPanel            ← PlayerBattleUIManager 관할
+  ├── AbilityHUDPanel           ← PlayerBattleUIManager 관할
+  ├── EnemyHUDPanel             ← EnemyBattleUIManager 관할
+  │     ├── EnemySlot1
+  │     ├── EnemySlot2
+  │     └── EnemySlot3
+  ├── EncounterPanel            ← BattleUIManager 관할 (기본 비활성)
+  ├── VictoryPanel              ← BattleUIManager 관할 (기본 비활성)
+  └── DefeatPanel               ← BattleUIManager 관할 (기본 비활성)
 ```
 
 ---
@@ -140,9 +164,10 @@ Assets/HTH/
 [탐색 필드 — 2D 사이드뷰]
         │
         │  BattleTrigger.OnTriggerEnter2D (Player 접촉)
-        │    1. FieldManager.SaveReturnPositions()   ← 현재 위치 저장
-        │    2. FieldManager.EnterBattle()
-        │    3. BattleManager.StartBattle()
+        │    1. EncounterPanel 팝업 → 전투/도망 선택
+        │    2. [전투] 선택 시 FieldManager.SaveReturnPositions()
+        │    3. FieldManager.EnterBattle()
+        │    4. BattleManager.StartBattle()
         ▼
     EnterBattleRoutine()
         1. 페이드 아웃 (DOTween)
@@ -150,142 +175,74 @@ Assets/HTH/
            BattleFieldRoot      → SetActive(true)
         3. SetCameraToBattle()  ← BattleVCam Priority UP
         4. Player → BattlePlayerSpawnPoint 이동
-        5. 페이드 인 (DOTween)
+        5. _blackoutHoldDuration 유지
+        6. BattleUIManager.SetBattleHudActive(true) → SlideIn
+        7. 페이드 인 (DOTween)
         │
         ▼
 [배틀 필드 — 2.5D 쿼터뷰]
         │
-        │  BattleManager.EndBattle(isVictory: true)
-        │    → FieldManager.ReturnToField()
+        │  BattleManager.EndBattle(isVictory)
+        │    → isVictory=true  : BattleUIManager.ShowVictoryPanel()
+        │    → isVictory=false : BattleUIManager.ShowDefeatPanel()
+        │    → 버튼 클릭 시 ReturnToFieldFromResult()
         ▼
     ReturnToFieldRoutine()
-        1. 페이드 아웃
-        2. BattleFieldRoot      → SetActive(false)
+        1. BattleUIManager.SetBattleHudActive(false) → SlideOut
+        2. 페이드 아웃
+        3. BattleFieldRoot      → SetActive(false)
            ExplorationFieldRoot → SetActive(true)
-        3. SetCameraToExploration() ← ExplorationVCam Priority UP
-        4. Player / 센트리 → SavedPosition 복귀
-        5. 페이드 인
+        4. SetCameraToExploration() ← ExplorationVCam Priority UP
+        5. Player / 센트리 → SavedPosition 복귀
+        6. 페이드 인
         │
         ▼
 [탐색 필드 복귀]
 ```
 
-### 카메라 전환 방식 (Cinemachine Priority)
-
-| 상태 | ExplorationVCam Priority | BattleVCam Priority | 활성 카메라 |
-|------|-------------------------|---------------------|-------------|
-| 탐색 중 | **10** (높음) | 9 (낮음) | ExplorationVCam |
-| 배틀 중 | 19 (낮음) | **20** (높음) | BattleVCam |
-
-> CinemachineBrain이 Priority가 높은 VCam을 자동으로 추종하며 블렌드 전환을 처리한다.
-
-### 센트리 모드별 동작
-
-| 항목 | 탐색 필드 (2D 사이드뷰) | 배틀 필드 (2.5D 쿼터뷰) |
-|------|------------------------|------------------------|
-| 이동 방식 | `Rigidbody2D.linearVelocity` | 전투 AI 자율 이동 |
-| 추종 대상 | 플레이어 포메이션 오프셋 | `SentryBattleSpawnPoints[i]` |
-| 제어 주체 | `SentryBase.FollowPlayer()` | `StopFollowing()` 후 AI |
-| 좌표계 | 2D XY (횡스크롤) | 2.5D XZ+Y (쿼터뷰 원근) |
-
----
-
-## 🧩 주요 클래스 설명
-
-### SentryBase.cs
-모든 센트리의 공통 기반. 상속 구조:
+### UI 매니저 분리 구조
 
 ```
-SentryBase (MonoBehaviour)
-  ├── StrikeSentry
-  ├── ShootSentry
-  └── WallSentry
+BattleUIManager (조율자)
+  │  SetBattleHudActive(true/false)
+  ├──→ PlayerBattleUIManager.SlideIn() / SlideOut()
+  └──→ EnemyBattleUIManager.SlideIn() / SlideOut()
+
+PlayerBattleUIManager
+  ├── 센트리 3종 HP바 / 스킬 게이지 / 레벨 / EXP바 / KO아이콘
+  ├── 플레이어 능력 쿨타임 3개
+  └── 콤보 게이지 / 2콤보 아이콘(슬롯별 3개) / 3콤보 아이콘(슬롯별 3개)
+
+EnemyBattleUIManager
+  ├── 적 슬롯 1~3 (소환 수에 따라 활성/비활성)
+  │     각 슬롯: 이름 텍스트 / 레벨 텍스트 / HP바 / KO아이콘
+  └── RegisterEnemy() / OnEnemyDied() / ClearAllSlots()
 ```
 
-주요 공개 메서드:
-- `StartFollowing()` / `StopFollowing()` — 플레이어 추종 ON/OFF
-- `SetInvincible(bool)` — 콤보 중 무적 상태 제어
-- `TakeDamage(int)` — 데미지 수신
-- `LevelUp()` — 레벨업 처리 (override 가능)
-- `AddExp(int)` — 경험치 추가
+### SentryComboManager 큐 시스템
 
-### FieldManager.cs (싱글턴)
-```csharp
-// 위치 저장 (배틀 트리거 접촉 시점)
-FieldManager.Instance.SaveReturnPositions(player, strike, shoot, wall);
+```
+게이지 만참 → TryEnqueueCombo()
+  ├── 3기 생존 + 3콤보 쿨타임 OK → AllThree 큐 추가
+  └── 그 외 → 가능한 2콤보 조합 수집 후 랜덤 1개 선택
+        candidates: StrikeShoot / StrikeWall / ShootWall (쿨타임 OK인 것만)
+        → Random.Range로 1개 Enqueue
 
-// 배틀 진입
-FieldManager.Instance.EnterBattle(player);
-
-// 탐색 복귀
-FieldManager.Instance.ReturnToField(strike, shoot, wall);
+콤보 재생 중이 아니면 즉시 TryDequeueAndPlay()
+콤보 재생 중이면 큐 대기 → OnComboFinished() 후 자동 실행
 ```
 
-Inspector 연결 필수 항목:
-- `_explorationFieldRoot` — ExplorationField 루트 오브젝트
-- `_battleFieldRoot` — BattleField 루트 오브젝트
-- `_explorationVCam` — ExplorationVirtualCamera
-- `_battleVCam` — BattleVirtualCamera
-- `_battlePlayerSpawnPoint` — 배틀 진입 시 플레이어 스폰 위치
-- `_fadePanel` — 전환 연출용 CanvasGroup
+### 적 콤보 순번 AI (EnemyComboManager)
 
-### ComboManager.cs (싱글턴)
-콤보 종류:
-
-| ID | 조합 | 연출 |
-|----|------|------|
-| 2콤보 A | 타격 + 사격 | 타격 → 사격 실린더 타격 → 관통탄 발사 |
-| 2콤보 B | 타격 + 벽 | 타격 → 벽 센트리 날림 → 고속 돌진 압착 |
-| 2콤보 C | 사격 + 벽 | 연속 사격 → 벽 센트리 하늘에서 낙하 압착 |
-| 3콤보 | 전원 | 타격이 적을 날림 → 벽이 붙잡음 → 사격 연발 → 최종 밀치기 |
-
-콤보 공통 흐름:
 ```
-1. 콤보 전 위치 저장 (복귀용)
-2. SetInvincible(true) + StopFollowing()
-3. CalcComboPositions(target) → 동적 포지션 계산
-4. 각 센트리 DOMove → 집결
-5. 연출 실행 (DOTween Sequence)
-6. ReturnFromCombo() → 콤보 전 위치 복귀
-7. SetInvincible(false) + StartFollowing()
-```
+BattleEncounterDataSO.comboCount 기준:
+  1 = 단독 공격 (모두 자유)
+  2 = EnemyA → EnemyB → EnemyA ... 순환
+  3 = EnemyA → EnemyB → EnemyC → ... 순환
 
-### BattleEncounterDataSO.cs (ScriptableObject)
-```
-Project 우클릭 → Create → SENTRY → BattleEncounterData
-```
-- `encounterName` — 인카운터 식별 이름
-- `killCountToWin` — 클리어 처치 수 (0이면 전체 적 수)
-- `spawnEntries` — `EnemySpawnEntry[]` (프리팹, 수량, 딜레이, 간격)
-
----
-
-## 🐛 트러블슈팅 / 확인 사항
-
-### 배틀 필드 진입 후 여전히 2D 사이드뷰로 보이는 문제
-
-**원인 후보:**
-
-1. **Inspector VCam 미연결** (가장 흔한 원인)
-   - `FieldManager` Inspector에서 `_explorationVCam`, `_battleVCam` 슬롯이 비어있으면 null 체크로 그냥 넘어감
-   - `SetCameraToBattle()`이 호출돼도 실제 Priority 변경이 일어나지 않음
-
-2. **BattleVCam 물리적 위치가 사이드뷰 앵글**
-   - Priority는 전환됐어도 BattleVCam 자체가 옆에서 찍는 위치에 있으면 동일하게 보임
-   - BattleVCam을 쿼터뷰 앵글 (위에서 비스듬히 내려다보는 위치)에 배치해야 함
-
-3. **Priority 값 역전**
-   - `_explorationCamPriority = 10`, `_battleCamPriority = 20` 이어야 함
-   - 배틀 Priority가 탐색보다 높아야 BattleVCam이 활성화됨
-
-**체크리스트:**
-```
-□ FieldManager._explorationVCam → ExplorationVirtualCamera 드래그 연결
-□ FieldManager._battleVCam      → BattleVirtualCamera 드래그 연결
-□ BattleVirtualCamera 위치: 쿼터뷰 앵글로 배치 (Y높이 + 약간 기울임)
-□ _explorationCamPriority = 10, _battleCamPriority = 20 확인
-□ BattleFieldRoot 연결 및 하위에 쿼터뷰 배틀 씬 오브젝트 배치
-□ Console 로그: "[FieldManager] 배틀 필드 전환 완료 (2D → 2.5D 쿼터뷰)" 확인
+Enemy.TryAttack() → _isMyComboTurn 체크
+  → 내 순번이면 공격 후 EnemyComboManager.AdvanceTurn()
+  → 내 순번이 아니면 공격 건너뜀
 ```
 
 ---
@@ -313,9 +270,9 @@ Project 우클릭 → Create → SENTRY → BattleEncounterData
 - `SentryGrowthDataSO` 레벨업 성장 데이터 분리
 
 ### Session 4 — 스킬 연출 & 콤보 시스템
-- `SkillEffect_Strike` — 2연타 연출 (DOTween Sequence)
-- `SkillEffect_Shoot` — 3연발 + 레이저 조준선 + 총구 플래시 (LineRenderer)
-- `SkillEffect_Wall` — 강한 밀치기 + 기절 (Enemy.Stun() 연동)
+- `SkillEffectStrike` — 2연타 연출 (DOTween Sequence)
+- `SkillEffectShoot` — 3연발 + 레이저 조준선 + 총구 플래시 (LineRenderer)
+- `SkillEffectWall` — 강한 밀치기 + 기절 (Enemy.Stun() 연동)
 - `ComboManager` 작성
   - 2콤보 A (타격+사격): 관통탄 발사
   - 2콤보 B (타격+벽): 고속 돌진 압착
@@ -325,25 +282,100 @@ Project 우클릭 → Create → SENTRY → BattleEncounterData
 - `PlayerAbility` 특수 능력 3종 구현 (목표 지정, 긴급 수리, 과부하)
 - `UIManager` 전체 HUD 연동 (HP바, EXP바, 스킬 게이지, 콤보 게이지)
 
-### Session 5 (현재) — 필드 카메라 구조 검토
+### Session 5 — 필드 카메라 구조 검토
 - 3종 센트리의 2D / 2.5D 모드 분리 구조 재확인
 - 배틀 진입 시 2D 사이드뷰로 보이는 문제 원인 분석
 - `FieldManager` VCam 연결 및 Priority 체크리스트 정리
 - **ExplorationVCam / BattleVCam 2개 분리 필수** 결론 확정
-  - ExplorationVCam: Follow/LookAt Player, 횡스크롤 추종 카메라
-  - BattleVCam: 고정 쿼터뷰 앵글, 배틀 필드 전체 촬영
+
+### Session 6 — UI 분리 & 적 배틀 UI 설계 & 콤보 시스템 재설계
+#### 이름 변경
+| 구 이름 | 신 이름 | 비고 |
+|---------|---------|------|
+| `UIManager` | `BattleUIManager` | 조율자 역할로 경량화 |
+| `ComboManager` | `SentryComboManager` | 큐 시스템 재설계 포함 |
+| `EnemyComboGroup` | `EnemyComboManager` | 싱글턴 구조 유지 |
+
+#### 신규 파일
+| 파일 | 역할 |
+|------|------|
+| `PlayerBattleUIManager.cs` | 센트리 HUD / 능력 HUD / 콤보 HUD 전담 |
+| `EnemyBattleUIManager.cs` | 적 캐릭터 HUD 전담 (3슬롯 고정) |
+| `BattleUIButton.cs` | IPointer 호버/클릭 연출 버튼 컴포넌트 |
+
+#### 주요 변경 내용
+
+**BattleUIManager (구 UIManager)**
+- `_killCountText` / `_battleHudRoot` / `UpdateKillCount()` 제거
+  - 킬 카운트는 BattleManager 내부 승리 판정에서만 사용, UI 표시 불필요
+- 버튼 이벤트를 Inspector OnClick → `AddListener()` / `RemoveListener()` 방식으로 변경
+  - `_fightButton`, `_fleeButton`, `_victoryConfirmButton`, `_defeatReturnButton` Inspector 연결
+  - `Start()`에서 구독, `OnDestroy()`에서 해제
+
+**PlayerBattleUIManager**
+- 콤보 HUD 구조: 2콤보 아이콘 슬롯별 3개 + 3콤보 아이콘 슬롯별 3개
+  - 3개 아이콘이 각각 하나의 Ratio 값을 공유해서 동시에 갱신
+  - `Combo2CooldownRatio` → 생존 조합 중 가장 준비된 조합 대표값
+  - `Combo3CooldownRatio` → 전원 공용 1개
+
+**EnemyBattleUIManager**
+- 3슬롯 고정 구조 (동적 생성 방식 폐기)
+- 슬롯 내용: 이름 텍스트 / 레벨 텍스트 / HP바 / KO아이콘
+- `RegisterEnemy()` — EnemySpawner 소환 직후 호출
+- `OnEnemyDied()` — Enemy.Die()에서 직접 호출
+
+**SentryComboManager (구 ComboManager)**
+- 콤보 큐(`Queue<ComboType>`) 시스템 도입
+  - 게이지 만참 시 큐에 추가, 재생 중이면 대기 후 자동 실행
+- 2콤보 쿨타임 4개 개별 분리
+  - `_combo3CooldownTimer` / `_comboACooldownTimer` / `_comboBCooldownTimer` / `_comboCCooldownTimer`
+- 2콤보 랜덤 선택: 가능한 조합(쿨타임 OK + 생존) 후보 수집 후 `Random.Range`로 1개 선택
+
+**EnemyComboManager (구 EnemyComboGroup)**
+- `UnregisterEnemy()` → `OnEnemyDied()` 메서드명 변경
+- `EnemyBattleUIManager` 새 API에 맞게 호출부 수정
+
+**BattleEncounterDataSO**
+- `comboCount` 필드 추가 (`Range(1, 3)`)
+  - 1 = 단독 공격 / 2 = 2명 번갈아 / 3 = 3명 순환
+
+**Enemy.cs**
+- `_level` 필드 + `Level` 프로퍼티 추가
+- `_hpFillSprite` / `_hpBarGroup` 제거 (HP 표시는 EnemyBattleUIManager 전담)
+- `UpdateHpBar()` 메서드 제거
+- `Die()`에 `EnemyBattleUIManager.Instance?.OnEnemyDied(this)` 추가
+- `TryAttack()` 공격 완료 후 `EnemyComboManager.Instance?.AdvanceTurn()` 추가
+- `using UnityEngine.UI` 제거
+
+**BattleUIButton.cs (신규)**
+- `[RequireComponent(typeof(Button))]`
+- `IPointerEnterHandler` — 스케일 확대 + 색상 강조 (DOTween)
+- `IPointerExitHandler` — 스케일/색상 원상 복구 (DOTween)
+- `IPointerClickHandler` — 펀치 스케일 눌림 효과 (DOTween)
+- `OnDisable()`에서 Tween 중단 및 기본 상태 복구
 
 ---
 
 ## 📌 현재 미완성 / 다음 세션 TODO
 
-- [ ] BattleVCam Inspector 연결 확인 및 쿼터뷰 앵글 배치
+- [ ] Unity Inspector 연결 작업
+  - [ ] PlayerBattleUIManager / EnemyBattleUIManager 오브젝트 추가 및 연결
+  - [ ] EnemyComboManager BattleField 하위 배치
+  - [ ] Canvas 패널 구성 (EnemyHUDPanel 슬롯 3개, EncounterPanel, VictoryPanel, DefeatPanel)
+  - [ ] 각 버튼에 BattleUIButton 컴포넌트 추가
+  - [ ] BattleUIManager Inspector 버튼 4개 연결
+  - [ ] BattleEncounterDataSO Inspector에서 comboCount 설정
+- [ ] BattleManager.cs 수정
+  - [ ] `UIManager` → `BattleUIManager` 참조 변경
+  - [ ] `UpdateKillCount()` 호출 제거
+  - [ ] `ComboManager` → `SentryComboManager` 참조 변경
+- [ ] Enemy.cs 프리팹 수정 — HpBarGroup 오브젝트 제거
+- [ ] EnemySpawner.cs 수정
+  - [ ] `EnemyComboManager.Initialize()` 호출 추가
+  - [ ] `EnemyBattleUIManager.RegisterEnemy()` 호출 추가
 - [ ] 쉼터 구간 센트리 HP 회복 / 부활 시스템 구현
 - [ ] 과부하 폭주 상태 연출 (`PlayerAbility` Ability3)
-- [ ] 센트리 기절(KO) 후 배틀 필드 내 비활성 처리
-- [ ] 레벨업 연출 강화 (UIManager.PlayLevelUpEffect 확장)
-- [ ] 적 AI 다양화 (현재 기본 추적 AI만 존재)
-- [ ] 배틀 결과 화면 (Victory / Defeat 연출)
+- [ ] 배틀 결과 화면 연출 강화
 
 ---
 
@@ -358,3 +390,30 @@ Project 우클릭 → Create → SENTRY → BattleEncounterData
 | 싱글턴 | `public static T Instance { get; private set; }` 패턴 |
 | DOTween | 모션 연출 전반 (이동, 페이드, 펀치, 쉐이크) |
 | Cinemachine | `CinemachineCamera` (Unity.Cinemachine) Priority 방식 |
+| 버튼 이벤트 | `Button.onClick.AddListener()` / `RemoveListener()` — Inspector OnClick 지양 |
+
+---
+
+## 🐛 트러블슈팅 / 확인 사항
+
+### 배틀 필드 진입 후 여전히 2D 사이드뷰로 보이는 문제
+
+**원인 후보:**
+
+1. **Inspector VCam 미연결** (가장 흔한 원인)
+   - `FieldManager` Inspector에서 `_explorationVCam`, `_battleVCam` 슬롯이 비어있으면 null 체크로 그냥 넘어감
+
+2. **BattleVCam 물리적 위치가 사이드뷰 앵글**
+   - BattleVCam을 쿼터뷰 앵글 (위에서 비스듬히 내려다보는 위치)에 배치해야 함
+
+3. **Priority 값 역전**
+   - `_explorationCamPriority = 10`, `_battleCamPriority = 20` 이어야 함
+
+**체크리스트:**
+```
+□ FieldManager._explorationVCam → ExplorationVirtualCamera 드래그 연결
+□ FieldManager._battleVCam      → BattleVirtualCamera 드래그 연결
+□ BattleVirtualCamera 위치: 쿼터뷰 앵글로 배치 (Y높이 + 약간 기울임)
+□ _explorationCamPriority = 10, _battleCamPriority = 20 확인
+□ BattleFieldRoot 연결 및 하위에 쿼터뷰 배틀 씬 오브젝트 배치
+```

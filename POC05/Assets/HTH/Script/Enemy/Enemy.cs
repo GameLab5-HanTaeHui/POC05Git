@@ -1,5 +1,4 @@
 ﻿using UnityEngine;
-using UnityEngine.UI;
 using DG.Tweening;
 using System.Collections;
 
@@ -8,14 +7,12 @@ namespace SENTRY
     /// <summary>
     /// 배틀 필드에서 등장하는 적 캐릭터.
     ///
-    /// [변경 사항 - 페이크 쿼터뷰 대응]
-    /// - ChasePlayer()의 linearVelocityX 직접 할당을
-    ///   Rigidbody2D.MovePosition()으로 교체했습니다.
-    /// - 점프 로직(AddForce, linearVelocityY)은 페이크 쿼터뷰 모드에서
-    ///   의미가 없으므로 완전히 제거했습니다.
-    ///   (배틀 필드는 중력 없음 — Y축 = 깊이 역할)
-    /// - Update()에서 Y 위치 기반 SortingOrder를 매 프레임 갱신합니다.
-    ///   (Y가 낮을수록 가까이 = 앞에 그려집니다.)
+    /// [변경 사항]
+    /// - _level 필드 + Level 프로퍼티 추가
+    ///   EnemyBattleUIManager의 레벨 텍스트 슬롯에 표시됩니다.
+    /// - HP 바 스프라이트(_hpFillSprite / _hpBarGroup) 제거
+    ///   HP 표시는 EnemyBattleUIManager가 UI Canvas에서 전담합니다.
+    ///   UpdateHpBar() 메서드 및 관련 호출 코드도 함께 제거했습니다.
     ///
     /// [히어라키 위치]
     /// BattleField
@@ -24,8 +21,6 @@ namespace SENTRY
     ///         ├── Rigidbody2D  (gravityScale=0, Kinematic — EnemySpawner가 설정)
     ///         ├── Collider2D
     ///         └── SpriteRenderer
-    ///               └── HpBarGroup
-    ///                     └── HpFillSprite
     /// </summary>
 
     /// <summary>
@@ -43,6 +38,9 @@ namespace SENTRY
         [Header("기본 스탯")]
         [Tooltip("최대 체력")]
         [SerializeField] private int _maxHp = 100;
+
+        [Tooltip("적 레벨. EnemyBattleUIManager 레벨 텍스트에 표시됩니다.")]
+        [SerializeField] private int _level = 1;
 
         [Tooltip("이동 속도 (MovePosition 기반 — units/sec)")]
         [SerializeField] private float _moveSpeed = 2.5f;
@@ -69,13 +67,6 @@ namespace SENTRY
         [Header("경험치 설정")]
         [Tooltip("사망 시 센트리들에게 분배할 경험치 양")]
         [SerializeField] private int _expOnDeath = 30;
-
-        [Header("HP 바 UI (스프라이트 방식)")]
-        [Tooltip("HP 비율에 따라 X 스케일이 줄어드는 스프라이트")]
-        [SerializeField] private SpriteRenderer _hpFillSprite;
-
-        [Tooltip("HP 바 전체 그룹 오브젝트 (사망 시 비활성화)")]
-        [SerializeField] private GameObject _hpBarGroup;
 
         [Header("페이크 쿼터뷰 설정")]
         [Tooltip("Y 위치 기반 SortingOrder 갱신 배율.\n" +
@@ -130,6 +121,14 @@ namespace SENTRY
         /// <summary>SpriteRenderer 캐시 (방향 플립 + SortingOrder)</summary>
         private SpriteRenderer _spriteRenderer;
 
+        /// <summary>
+        /// 콤보 순번 권한 여부.
+        /// EnemyComboManager.AdvanceTurn()이 배분합니다.
+        /// true이면 TryAttack()에서 공격이 허용됩니다.
+        /// IsSingleMode = true이면 이 값은 무시되고 자유 공격합니다.
+        /// </summary>
+        private bool _isMyComboTurn = true;
+
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
@@ -140,6 +139,12 @@ namespace SENTRY
         /// <summary>현재 HP</summary>
         public int CurrentHp => _currentHp;
 
+        /// <summary>최대 HP (EnemyBattleUIManager HP 바 계산용)</summary>
+        public int MaxHp => _maxHp;
+
+        /// <summary>적 레벨 (EnemyBattleUIManager 레벨 텍스트 표시용)</summary>
+        public int Level => _level;
+
         // ─────────────────────────────────────────
         //  초기화
         // ─────────────────────────────────────────
@@ -148,7 +153,6 @@ namespace SENTRY
         /// 적을 초기화합니다. EnemySpawner가 생성 직후 호출합니다.
         ///
         /// [변경 사항]
-        ///   기존의 playerTransform 파라미터는 더 이상 의미가 없습니다.
         ///   Enemy는 씬 내 생존 센트리를 자동 탐색합니다.
         ///   EnemySpawner 시그니처 유지를 위해 파라미터를 받지만 무시합니다.
         /// </summary>
@@ -172,9 +176,6 @@ namespace SENTRY
         private void Start()
         {
             _currentHp = _maxHp;
-
-            if (_hpFillSprite != null)
-                _hpFillSprite.transform.localScale = Vector3.one;
         }
 
         private void Update()
@@ -203,7 +204,6 @@ namespace SENTRY
                 RefreshTarget();
                 if (_currentTarget == null)
                 {
-                    // 생존 센트리 없음 → 이동 중단 대기
                     _shouldMove = false;
                     return;
                 }
@@ -227,11 +227,7 @@ namespace SENTRY
 
         /// <summary>
         /// 씬 내 생존 중인 센트리 중 가장 가까운 센트리를 타겟으로 설정합니다.
-        ///
-        /// [탐색 대상]
-        ///   StrikeSentry, ShootSentry, WallSentry 모두 SentryBase를 상속하므로
-        ///   FindObjectsByType&lt;SentryBase&gt;()로 한 번에 탐색합니다.
-        ///   KO 상태(_isKnockedOut)인 센트리는 제외합니다.
+        /// KO 상태인 센트리는 제외합니다.
         /// </summary>
         private void RefreshTarget()
         {
@@ -275,19 +271,16 @@ namespace SENTRY
 
             if (dist <= _attackRange)
             {
-                // 공격 범위 내 — 이동 정지 후 공격
                 _shouldMove = false;
                 _moveDir = Vector2.zero;
                 TryAttack();
             }
             else
             {
-                // 타겟 방향으로 이동
                 _moveDir = ((Vector2)_currentTarget.transform.position
                                - (Vector2)transform.position).normalized;
                 _shouldMove = true;
 
-                // 이동 방향에 따라 스프라이트 좌우 반전
                 if (_spriteRenderer != null)
                     _spriteRenderer.flipX = _moveDir.x < 0;
             }
@@ -299,12 +292,17 @@ namespace SENTRY
 
         /// <summary>
         /// 쿨타임이 지났으면 타겟 센트리에게 데미지를 입힙니다.
-        /// SentryBase.TakeDamage()를 직접 호출합니다.
+        /// 콤보 순번 모드일 경우 자신의 차례가 아니면 공격을 건너뜁니다.
         /// </summary>
         private void TryAttack()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
             if (_currentTarget == null || _currentTarget.IsKnockedOut) return;
+
+            // 콤보 순번 체크 (단독 모드이면 항상 통과)
+            bool singleMode = EnemyComboManager.Instance == null
+                              || EnemyComboManager.Instance.IsSingleMode();
+            if (!singleMode && !_isMyComboTurn) return;
 
             _lastAttackTime = Time.time;
 
@@ -314,6 +312,10 @@ namespace SENTRY
             Vector3 punchDir =
                 (_currentTarget.transform.position - transform.position).normalized * 0.3f;
             transform.DOPunchPosition(punchDir, 0.18f, 5, 0.4f);
+
+            // 콤보 순번 모드이면 공격 완료 후 다음 순번으로 넘김
+            if (!singleMode)
+                EnemyComboManager.Instance?.AdvanceTurn();
 
             Debug.Log($"[{name}] → [{_currentTarget.SentryName}] 공격! " +
                       $"데미지: {_attackDamage}");
@@ -325,11 +327,7 @@ namespace SENTRY
 
         /// <summary>
         /// 센트리 공격(근접/원거리)을 받았을 때 호출됩니다.
-        ///
-        /// [넉백 처리 — Kinematic 안전]
-        ///   Kinematic 상태에서 AddForce는 동작하지 않으므로
-        ///   DOTween.DOMove로 밀려나는 방향으로 이동시킵니다.
-        ///   Strike(강한 근접) = 멀리, Shoot(원거리 탄환) = 짧게 밀립니다.
+        /// Kinematic 상태에서 DOMove로 넉백을 처리합니다.
         /// </summary>
         /// <param name="damage">입힐 데미지</param>
         /// <param name="hitType">피격 타입 (Strike / Shoot)</param>
@@ -367,8 +365,6 @@ namespace SENTRY
                 transform.DOMove(knockTarget, _knockDuration)
                     .SetEase(Ease.OutQuart);
             }
-
-            UpdateHpBar();
 
             if (_currentHp <= 0) Die();
         }
@@ -408,21 +404,17 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  HP 바 갱신
+        //  콤보 순번 설정
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// HP 비율에 맞게 HpFillSprite의 X 스케일을 DOTween으로 부드럽게 갱신합니다.
+        /// 콤보 순번 권한을 설정합니다.
+        /// EnemyComboManager.AdvanceTurn()에서 호출합니다.
         /// </summary>
-        private void UpdateHpBar()
+        /// <param name="isMyTurn">true = 이번 순번 / false = 대기</param>
+        public void SetComboTurn(bool isMyTurn)
         {
-            if (_hpFillSprite == null) return;
-
-            float ratio = _maxHp > 0 ? (float)_currentHp / _maxHp : 0f;
-
-            _hpFillSprite.transform
-                .DOScaleX(ratio, 0.2f)
-                .SetEase(Ease.OutQuart);
+            _isMyComboTurn = isMyTurn;
         }
 
         // ─────────────────────────────────────────
@@ -431,15 +423,13 @@ namespace SENTRY
 
         /// <summary>
         /// HP가 0이 되면 호출됩니다.
-        /// DOTween 사망 연출 후 BattleManager에 킬 카운트와 경험치를 통보합니다.
+        /// DOTween 사망 연출 후 EnemyComboManager와 BattleManager에 통보합니다.
         /// </summary>
         private void Die()
         {
             if (_isDead) return;
             _isDead = true;
             _shouldMove = false;
-
-            if (_hpBarGroup != null) _hpBarGroup.SetActive(false);
 
             // 사망 연출 — 축소 → 파괴
             transform.DOKill();
@@ -450,6 +440,9 @@ namespace SENTRY
             if (_spriteRenderer != null)
                 _spriteRenderer.DOFade(0f, 0.25f);
 
+            // KO 아이콘 표시 → 콤보 순번 정리 → 킬 카운트 + EXP
+            EnemyBattleUIManager.Instance?.OnEnemyDied(this);
+            EnemyComboManager.Instance?.OnEnemyDied(this);
             BattleManager.Instance?.OnEnemyDied(_expOnDeath);
 
             Debug.Log($"[{name}] 사망! 경험치 보상: {_expOnDeath}");

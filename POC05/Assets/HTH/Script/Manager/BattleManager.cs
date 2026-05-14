@@ -73,8 +73,7 @@ namespace SENTRY
             _killCountToWin = encounterData.GetKillCountToWin();
             _expGainedThisBattle.Clear();
 
-            ComboManager.Instance?.OnBattleStart();
-            UIManager.Instance?.UpdateKillCount(0, _killCountToWin);
+            SentryComboManager.Instance?.OnBattleStart();
 
             Debug.Log($"<color=cyan>[BattleManager] 배틀 시작! " +
                       $"인카운터: {encounterData.encounterName} / 목표: {_killCountToWin}</color>");
@@ -168,8 +167,7 @@ namespace SENTRY
             _currentKillCount++;
             _enemySpawner?.NotifyEnemyDied();
             DistributeExp(expAmount);
-            ComboManager.Instance?.OnEnemyKilled();
-            UIManager.Instance?.UpdateKillCount(_currentKillCount, _killCountToWin);
+            SentryComboManager.Instance?.OnEnemyKilled();
 
             if (_currentKillCount >= _killCountToWin)
                 EndBattle(isVictory: true);
@@ -203,7 +201,7 @@ namespace SENTRY
             _isInBattle = false;
 
             _enemySpawner?.SpawnStop();
-            ComboManager.Instance?.OnBattleEnd();
+            SentryComboManager.Instance?.OnBattleEnd();
 
             if (_strikeSentry != null) { _strikeSentry.ExitBattle(); _strikeSentry.ExitBattlePhysics(); }
             if (_shootSentry != null) { _shootSentry.ExitBattle(); _shootSentry.ExitBattlePhysics(); }
@@ -212,12 +210,12 @@ namespace SENTRY
             if (isVictory)
             {
                 Debug.Log("<color=lime>[BattleManager] 배틀 클리어!</color>");
-                UIManager.Instance?.ShowVictoryPanel(BuildBattleResult());
+                BattleUIManager.Instance?.ShowVictoryPanel(BuildBattleResult());
             }
             else
             {
                 Debug.Log("<color=red>[BattleManager] 패배</color>");
-                UIManager.Instance?.ShowDefeatPanel();
+                BattleUIManager.Instance?.ShowDefeatPanel();
             }
         }
 
@@ -262,7 +260,7 @@ namespace SENTRY
         /// </summary>
         public void ReturnToFieldFromResult()
         {
-            UIManager.Instance?.HideResultPanels();
+            BattleUIManager.Instance?.HideResultPanels();
             FieldManager.Instance?.ReturnToField(
                 _strikeSentry?.transform,
                 _shootSentry?.transform,

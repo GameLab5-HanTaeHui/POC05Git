@@ -282,7 +282,7 @@ namespace SENTRY
                     if (capturedTarget == null) return;
                     Enemy e = capturedTarget.GetComponent<Enemy>();
                     e?.TakeDamage(skillDamage, HitType.Strike, transform.position);
-                    ComboManager.Instance?.OnSentrySkillUsed();
+                    SentryComboManager.Instance?.OnSentrySkillUsed();
                 }
             );
         }

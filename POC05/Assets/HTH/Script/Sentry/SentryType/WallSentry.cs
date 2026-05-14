@@ -329,7 +329,7 @@ namespace SENTRY
                                   .SetEase(Ease.OutExpo);
 
                     // 스킬 사용 완료 → 콤보 게이지 충전 통보
-                    ComboManager.Instance?.OnSentrySkillUsed();
+                    SentryComboManager.Instance?.OnSentrySkillUsed();
                 }
             );
         }

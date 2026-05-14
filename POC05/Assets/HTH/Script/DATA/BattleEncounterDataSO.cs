@@ -6,21 +6,22 @@ namespace SENTRY
     /// <summary>
     /// 배틀 인카운터(전투 구성)를 정의하는 ScriptableObject.
     ///
-    /// [설계 의도]
-    /// - 각 BattleTrigger가 이 SO를 참조하여 어떤 적을 몇 마리 소환할지 결정합니다.
-    /// - 같은 인카운터 구성을 여러 BattleTrigger에서 재사용할 수 있습니다.
-    /// - 밸런싱 시 SO 파일만 수정하면 해당 SO를 참조하는
-    ///   모든 BattleTrigger에 자동 반영됩니다.
+    /// [변경 사항]
+    /// - comboCount 필드 추가
+    ///   EnemyComboGroup이 이 값을 읽어 적 콤보 순번 AI를 초기화합니다.
+    ///     1 = 단독 공격 (기존 방식)
+    ///     2 = 2명이 번갈아 공격
+    ///     3 = 3명이 순서대로 공격
     ///
     /// [사용 방법]
     /// Project 창 우클릭 → Create → SENTRY → BattleEncounterData
-    /// 예) Forest_Easy, Cave_Normal, Boss_Hard 등으로 구성별 생성
     ///
     /// [히어라키 흐름]
     /// BattleTrigger._encounterData (이 SO 참조)
     ///   → BattleManager.StartBattle(encounterData)
     ///   → EnemySpawner.SpawnStart(encounterData)
-    ///   → 적 순차 소환
+    ///   → EnemyComboGroup.Initialize(comboCount)
+    ///   → 적 순차 소환 + 콤보 순번 AI 활성
     /// </summary>
     [CreateAssetMenu(
         fileName = "BattleEncounterData",
@@ -38,8 +39,21 @@ namespace SENTRY
         public string encounterName = "NewEncounter";
 
         [Tooltip("배틀 클리어에 필요한 처치 수.\n" +
-                 "0이면 _spawnEntries의 총 적 수를 자동으로 사용합니다.")]
+                 "0이면 spawnEntries의 총 적 수를 자동으로 사용합니다.")]
         public int killCountToWin = 0;
+
+        // ─────────────────────────────────────────
+        //  적 콤보 순번 설정
+        // ─────────────────────────────────────────
+
+        [Header("적 콤보 순번 설정")]
+        [Tooltip("적 캐릭터 콤보 순번 수.\n" +
+                 "1 = 단독 공격 (모두 자유 공격)\n" +
+                 "2 = 2명이 번갈아가며 공격\n" +
+                 "3 = 3명이 순서대로 공격\n\n" +
+                 "EnemyComboGroup이 이 값을 읽어 AI를 초기화합니다.")]
+        [Range(1, 3)]
+        public int comboCount = 1;
 
         // ─────────────────────────────────────────
         //  적 소환 목록
@@ -77,7 +91,7 @@ namespace SENTRY
     }
 
     // ─────────────────────────────────────────────
-    //  적 소환 엔트리 (인라인 데이터 구조체)
+    //  적 소환 엔트리
     // ─────────────────────────────────────────────
 
     /// <summary>
@@ -87,8 +101,7 @@ namespace SENTRY
     [System.Serializable]
     public class EnemySpawnEntry
     {
-        [Tooltip("소환할 적 프리팹.\n" +
-                 "Enemy.cs가 붙어 있어야 합니다.")]
+        [Tooltip("소환할 적 프리팹. Enemy.cs가 붙어 있어야 합니다.")]
         public GameObject enemyPrefab;
 
         [Tooltip("이 프리팹을 몇 마리 소환할지 지정합니다.")]

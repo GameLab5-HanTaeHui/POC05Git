@@ -93,6 +93,7 @@ namespace SENTRY
             Debug.Log($"[EnemySpawner] 인카운터 시작: {encounterData.encounterName} " +
                       $"/ 총 적 수: {encounterData.GetTotalEnemyCount()}");
 
+            EnemyComboManager.Instance?.Initialize(encounterData.comboCount);
             StartCoroutine(SpawnRoutine());
         }
 
@@ -205,6 +206,7 @@ namespace SENTRY
             if (enemyScript != null)
                 enemyScript.Init(_playerTransform);
 
+            EnemyComboManager.Instance?.RegisterEnemy(enemyScript.GetComponent<Enemy>());
             _aliveEnemyCount++;
             _totalSpawnedCount++;
 
