@@ -7723,9 +7723,9 @@ GameObject:
   - component: {fileID: 1432970185}
   - component: {fileID: 1432970191}
   - component: {fileID: 1432970190}
-  - component: {fileID: 1432970189}
-  - component: {fileID: 1432970188}
-  - component: {fileID: 1432970187}
+  - component: {fileID: 1432970194}
+  - component: {fileID: 1432970193}
+  - component: {fileID: 1432970192}
   m_Layer: 6
   m_Name: Player
   m_TagString: Player
@@ -7807,76 +7807,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1432970187
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1432970184}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6ab44a5de9c8b0440bcabe66737a71b3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerAbility
-  _strikeSentry: {fileID: 794165725}
-  _shootSentry: {fileID: 1398330198}
-  _wallSentry: {fileID: 1955320326}
-  _ability1InitialDelay: 10
-  _ability1Cooldown: 15
-  _targetMarkDuration: 8
-  _targetMarkerPrefab: {fileID: 0}
-  _ability2InitialDelay: 15
-  _ability2Cooldown: 20
-  _repairHealAmount: 50
-  _ability3InitialDelay: 20
-  _ability3Cooldown: 40
-  _overloadDuration: 6
-  _overloadDamageMultiplier: 2.5
-  _overloadSpeedMultiplier: 1.8
-  _ability1Key: 113
-  _ability2Key: 101
-  _ability3Key: 114
-  _sentrySelectKeys: 310000003200000033000000
---- !u!114 &1432970188
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1432970184}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 46d496ed38cd2c14e99215a80504ec05, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerHealth
-  _maxHp: 100
-  _hpSlider: {fileID: 0}
-  _invincibilityDuration: 1
-  _spriteRenderer: {fileID: 1432970185}
-  _playerObject: {fileID: 1432970184}
-  _playerLayerName: Player
-  _invincibleLayerName: InvinciblePlayer
---- !u!114 &1432970189
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1432970184}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 68867fd764dd72d4da77e5717bd82138, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerController
-  _rigid2D: {fileID: 1432970191}
-  _movePower: 5
-  _jumpPower: 300
-  _maxJumps: 2
-  _groundLayer:
-    serializedVersion: 2
-    m_Bits: 1048576
-  _groundCheckDistance: 1.1
 --- !u!61 &1432970190
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -7950,6 +7880,76 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 4
+--- !u!114 &1432970192
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1432970184}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6ab44a5de9c8b0440bcabe66737a71b3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerAbility
+  _strikeSentry: {fileID: 794165725}
+  _shootSentry: {fileID: 1398330198}
+  _wallSentry: {fileID: 1955320326}
+  _ability1InitialDelay: 10
+  _ability1Cooldown: 15
+  _targetMarkDuration: 8
+  _targetMarkerPrefab: {fileID: 0}
+  _ability2InitialDelay: 15
+  _ability2Cooldown: 20
+  _repairHealAmount: 50
+  _ability3InitialDelay: 20
+  _ability3Cooldown: 40
+  _overloadDuration: 6
+  _overloadDamageMultiplier: 2.5
+  _overloadSpeedMultiplier: 1.8
+  _ability1Key: 113
+  _ability2Key: 101
+  _ability3Key: 114
+  _sentrySelectKeys: 310000003200000033000000
+--- !u!114 &1432970193
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1432970184}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 46d496ed38cd2c14e99215a80504ec05, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerHealth
+  _maxHp: 100
+  _hpSlider: {fileID: 0}
+  _invincibilityDuration: 1
+  _spriteRenderer: {fileID: 1432970185}
+  _playerObject: {fileID: 1432970184}
+  _playerLayerName: Player
+  _invincibleLayerName: InvinciblePlayer
+--- !u!114 &1432970194
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1432970184}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 68867fd764dd72d4da77e5717bd82138, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerController
+  _rigid2D: {fileID: 1432970191}
+  _movePower: 5
+  _jumpPower: 300
+  _maxJumps: 2
+  _groundLayer:
+    serializedVersion: 2
+    m_Bits: 1048576
+  _groundCheckDistance: 1.1
 --- !u!1 &1447332101
 GameObject:
   m_ObjectHideFlags: 0
