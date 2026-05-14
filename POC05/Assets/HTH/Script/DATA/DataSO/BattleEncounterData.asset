@@ -19,3 +19,11 @@ MonoBehaviour:
     count: 1
     spawnDelay: 0
     spawnInterval: 0
+  - enemyPrefab: {fileID: 2294978399456111398, guid: 5fcdc7ff4c741f24eb71afd71c4e2a15, type: 3}
+    count: 1
+    spawnDelay: 0
+    spawnInterval: 0
+  - enemyPrefab: {fileID: 2294978399456111398, guid: 5fcdc7ff4c741f24eb71afd71c4e2a15, type: 3}
+    count: 1
+    spawnDelay: 0
+    spawnInterval: 0
