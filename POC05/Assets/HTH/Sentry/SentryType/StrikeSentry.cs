@@ -6,10 +6,11 @@ namespace SENTRY
     /// <summary>
     /// 타격(근접) 센트리 소환수.
     ///
-    /// [변경 사항 - Session 4]
-    /// - UseSkill() 내부 연출 코드를 제거하고 SkillEffect_Strike.PlaySkill()에 위임합니다.
-    /// - 데미지 적용은 콜백(Action)으로 전달하여 연출 타이밍에 맞게 발동됩니다.
-    /// - 스킬 연출 중 AI 정지 여부를 SkillEffect_Strike.IsPlaying으로 판단합니다.
+    /// [변경 사항 - 페이크 쿼터뷰 대응]
+    /// - HandleBattleAI() 내부의 linearVelocity 할당을
+    ///   SentryBase.BattleMove() 호출로 교체했습니다.
+    /// - Kinematic 상태에서 linearVelocity는 무시되므로
+    ///   MovePosition 기반의 BattleMove()가 필수입니다.
     ///
     /// [히어라키 위치]
     /// Sentries
@@ -37,7 +38,7 @@ namespace SENTRY
         [Tooltip("기본 공격 쿨타임 (초)")]
         [SerializeField] private float _attackCooldown = 1.2f;
 
-        [Tooltip("적을 향해 이동하는 속도")]
+        [Tooltip("적을 향해 이동하는 속도 (배틀 필드 BattleMove에 사용)")]
         [SerializeField] private float _chaseSpeed = 3.5f;
 
         [Tooltip("적 감지 반경")]
@@ -64,10 +65,19 @@ namespace SENTRY
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
+        /// <summary>현재 추적 중인 적 Transform</summary>
         private Transform _currentTarget;
+
+        /// <summary>마지막 공격 시각 (Time.time)</summary>
         private float _lastAttackTime;
+
+        /// <summary>현재 스킬 게이지 누적량</summary>
         private float _currentSkillGauge = 0f;
+
+        /// <summary>배틀 AI 활성 여부</summary>
         private bool _isInBattle = false;
+
+        /// <summary>Rigidbody2D 캐시 (탐색 필드 이동에만 사용)</summary>
         private Rigidbody2D _rigid2D;
 
         // ─────────────────────────────────────────
@@ -84,13 +94,13 @@ namespace SENTRY
         //  초기화
         // ─────────────────────────────────────────
 
+        /// <summary>SentryBase.Init() 이후 StrikeSentry 전용 초기화를 수행합니다.</summary>
         public override void Init(Transform player)
         {
             base.Init(player);
             _rigid2D = GetComponent<Rigidbody2D>();
             _currentSkillGauge = 0f;
 
-            // SkillEffect_Strike 자동 탐색 (Inspector 미연결 시)
             if (_skillEffect == null)
                 _skillEffect = GetComponent<SkillEffect_Strike>();
         }
@@ -143,20 +153,29 @@ namespace SENTRY
 
             float minDist = float.MaxValue;
             Transform closest = null;
+
             foreach (var col in hits)
             {
                 float d = Vector2.Distance(transform.position, col.transform.position);
                 if (d < minDist) { minDist = d; closest = col.transform; }
             }
+
             _currentTarget = closest;
         }
 
-        /// <summary>타겟 추적 및 공격 범위 내 진입 시 공격 시도합니다.</summary>
+        /// <summary>
+        /// 타겟을 추적하고 공격 범위 내 진입 시 공격을 시도합니다.
+        ///
+        /// [페이크 쿼터뷰 대응]
+        ///   linearVelocity 직접 할당 → BattleMove() 호출로 변경.
+        ///   BattleMove()는 내부적으로 Rigidbody2D.MovePosition()을 사용하여
+        ///   Kinematic 상태에서도 정상 이동합니다.
+        /// </summary>
         private void HandleBattleAI()
         {
             if (_currentTarget == null)
             {
-                if (_rigid2D != null) _rigid2D.linearVelocityX = 0f;
+                BattleStop();
                 return;
             }
 
@@ -164,13 +183,16 @@ namespace SENTRY
 
             if (dist <= _attackRange)
             {
-                if (_rigid2D != null) _rigid2D.linearVelocity = Vector2.zero;
+                // 공격 범위 내 — 정지 후 공격
+                BattleStop();
                 TryAttack();
             }
             else
             {
-                Vector2 dir = (_currentTarget.position - transform.position).normalized;
-                if (_rigid2D != null) _rigid2D.linearVelocity = dir * _chaseSpeed;
+                // 적을 향해 추적 이동
+                Vector2 dir = ((Vector2)_currentTarget.position
+                               - (Vector2)transform.position).normalized;
+                BattleMove(dir, _chaseSpeed * OverloadSpeedMultiplier);
             }
         }
 
@@ -188,14 +210,19 @@ namespace SENTRY
 
             Enemy enemy = _currentTarget.GetComponent<Enemy>();
             if (enemy != null)
-                enemy.TakeDamage(_attackDamage, HitType.Strike, transform.position);
+                enemy.TakeDamage(
+                    Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier),
+                    HitType.Strike,
+                    transform.position);
 
-            // 기본 타격 연출 (스킬 이펙트 컴포넌트가 없을 때 폴백)
-            Vector3 punchDir = (_currentTarget.position - transform.position).normalized * 0.3f;
+            // 기본 타격 연출 (폴백 — SkillEffect 없을 때)
+            Vector3 punchDir =
+                (_currentTarget.position - transform.position).normalized * 0.3f;
             transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
 
             ChargeSkillGauge(_skillGaugePerAttack);
-            Debug.Log($"[{SentryName}] 기본 공격! 데미지: {_attackDamage}");
+            Debug.Log($"[{SentryName}] 기본 공격! 데미지: " +
+                      $"{Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier)}");
         }
 
         // ─────────────────────────────────────────
@@ -205,7 +232,8 @@ namespace SENTRY
         /// <summary>스킬 게이지를 충전하고 가득 차면 스킬을 발동합니다.</summary>
         private void ChargeSkillGauge(float amount)
         {
-            _currentSkillGauge = Mathf.Min(_currentSkillGauge + amount, _maxSkillGauge);
+            _currentSkillGauge =
+                Mathf.Min(_currentSkillGauge + amount, _maxSkillGauge);
 
             if (_currentSkillGauge >= _maxSkillGauge
                 && (_skillEffect == null || !_skillEffect.IsPlaying))
@@ -216,7 +244,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  고유 스킬 (2연타) - SkillEffect_Strike 연동
+        //  고유 스킬 (2연타) — SkillEffect_Strike 연동
         // ─────────────────────────────────────────
 
         /// <summary>
@@ -226,69 +254,70 @@ namespace SENTRY
         private void UseSkill()
         {
             if (_currentTarget == null) return;
+
             if (_skillEffect == null)
             {
-                // SkillEffect가 없을 경우 즉시 데미지만 적용
                 FallbackSkillDamage();
                 return;
             }
 
-            int skillDamage = Mathf.RoundToInt(_attackDamage * _skillDamageMultiplier);
+            int skillDamage =
+                Mathf.RoundToInt(_attackDamage * _skillDamageMultiplier
+                                              * OverloadDamageMultiplier);
             Transform capturedTarget = _currentTarget;
 
-            Debug.Log($"<color=yellow>[{SentryName} 스킬 발동!]</color> 2연타");
+            Debug.Log($"<color=yellow>[{SentryName} 스킬 발동!]</color> " +
+                      $"2연타 데미지: {skillDamage}");
 
             _skillEffect.PlaySkill(
                 capturedTarget,
                 onFirstHit: () =>
                 {
-                    // 1타 데미지
-                    if (capturedTarget != null)
-                    {
-                        Enemy e = capturedTarget.GetComponent<Enemy>();
-                        if (e != null) e.TakeDamage(skillDamage, HitType.Strike, transform.position);
-                    }
+                    if (capturedTarget == null) return;
+                    Enemy e = capturedTarget.GetComponent<Enemy>();
+                    e?.TakeDamage(skillDamage, HitType.Strike, transform.position);
                 },
                 onSecondHit: () =>
                 {
-                    // 2타 데미지
-                    if (capturedTarget != null)
-                    {
-                        Enemy e = capturedTarget.GetComponent<Enemy>();
-                        if (e != null) e.TakeDamage(skillDamage, HitType.Strike, transform.position);
-                    }
+                    if (capturedTarget == null) return;
+                    Enemy e = capturedTarget.GetComponent<Enemy>();
+                    e?.TakeDamage(skillDamage, HitType.Strike, transform.position);
+                    ComboManager.Instance?.OnSentrySkillUsed();
                 }
             );
         }
 
-        /// <summary>SkillEffect_Strike 컴포넌트가 없을 때의 폴백 처리.</summary>
+        /// <summary>SkillEffect 컴포넌트가 없을 때의 폴백 처리.</summary>
         private void FallbackSkillDamage()
         {
             if (_currentTarget == null) return;
-            int skillDamage = Mathf.RoundToInt(_attackDamage * _skillDamageMultiplier);
+            int dmg = Mathf.RoundToInt(_attackDamage * _skillDamageMultiplier
+                                                      * OverloadDamageMultiplier);
             Enemy e = _currentTarget.GetComponent<Enemy>();
-            if (e != null) e.TakeDamage(skillDamage * 2, HitType.Strike, transform.position);
+            e?.TakeDamage(dmg, HitType.Strike, transform.position);
         }
 
         // ─────────────────────────────────────────
         //  레벨업 (Override)
         // ─────────────────────────────────────────
 
-        /// <summary>레벨업 시 공격력과 공격 범위를 추가로 증가시킵니다.</summary>
+        /// <summary>레벨업 시 타격 스탯을 추가 강화합니다.</summary>
         protected override void LevelUp()
         {
             base.LevelUp();
             _attackDamage = Mathf.RoundToInt(_attackDamage * 1.1f);
+            _chaseSpeed += 0.1f;
             _attackRange += 0.05f;
-            Debug.Log($"[{SentryName}] 공격력: {_attackDamage} / 공격 범위: {_attackRange:F2}");
+            Debug.Log($"[{SentryName}] 공격력: {_attackDamage} / " +
+                      $"추적 속도: {_chaseSpeed:F1} / 범위: {_attackRange:F2}");
         }
 
 #if UNITY_EDITOR
         private void OnDrawGizmos()
         {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, _detectionRange);
             Gizmos.color = Color.red;
+            Gizmos.DrawWireSphere(transform.position, _detectionRange);
+            Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, _attackRange);
         }
 #endif

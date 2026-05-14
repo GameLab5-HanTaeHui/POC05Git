@@ -12,6 +12,7 @@ GameObject:
   - component: {fileID: 7126901013376302068}
   - component: {fileID: 2529004548730972453}
   - component: {fileID: 4502123790145124443}
+  - component: {fileID: 7382502751058090564}
   m_Layer: 0
   m_Name: SentryBullet
   m_TagString: Untagged
@@ -156,3 +157,18 @@ Rigidbody2D:
   m_SleepingMode: 1
   m_CollisionDetection: 0
   m_Constraints: 0
+--- !u!114 &7382502751058090564
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8453319382589875619}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 996e0f24bdcb450409d8b74059b68a0b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.SentryBullet
+  _speed: 12
+  _lifeTime: 2
+  damage: 20

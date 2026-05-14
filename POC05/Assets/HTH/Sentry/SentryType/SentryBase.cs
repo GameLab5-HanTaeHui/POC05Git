@@ -12,14 +12,16 @@ namespace SENTRY
     /// ▶ 탐색 필드 (2D 사이드뷰)
     ///   - 플레이어 뒤를 포메이션 오프셋으로 따라다닙니다.
     ///   - _formationOffset은 2D 사이드뷰 기준 X/Y 오프셋입니다.
-    ///   - Rigidbody2D linearVelocity 방식으로 이동합니다.
+    ///   - Rigidbody2D Dynamic + linearVelocity 방식으로 이동합니다.
+    ///   - 중력이 활성화되어 있어 점프·낙하가 정상 동작합니다.
     ///
-    /// ▶ 배틀 필드 (2.5D 쿼터뷰)
-    ///   - FieldManager.SentryBattleSpawnPoints[i] 위치로 배치됩니다.
-    ///   - 배틀 중에는 StopFollowing() 상태로 전투 AI가 이동을 제어합니다.
-    ///   - 쿼터뷰 좌표계(X: 좌우, Y: 상하 원근감)를 사용합니다.
-    ///   - FormationWorldPosition은 배틀 종료 후 복귀 목표로만 사용합니다.
-    ///     (탐색 필드 복귀 후 플레이어 포메이션 위치)
+    /// ▶ 배틀 필드 (페이크 쿼터뷰)
+    ///   - EnterBattlePhysics() 호출로 Kinematic 전환 + 중력 OFF.
+    ///   - 이동은 Rigidbody2D.MovePosition()으로 처리합니다.
+    ///     (Kinematic 상태에서 linearVelocity는 동작하지 않음)
+    ///   - Y축이 깊이(원근감) 역할 → Y가 클수록 화면 위 = 멀리 있는 것.
+    ///   - SortingOrder를 Y 위치 기반으로 매 프레임 갱신하여 앞뒤 정렬.
+    ///   - 배틀 종료 후 ExitBattlePhysics() 로 Dynamic + 원래 중력 복원.
     ///
     /// [히어라키 위치]
     /// Sentries
@@ -71,25 +73,62 @@ namespace SENTRY
         [Tooltip("피격 / 무적 / 과부화 / 회복 연출용 SpriteRenderer")]
         [SerializeField] private SpriteRenderer _spriteRenderer;
 
+        [Header("페이크 쿼터뷰 설정 (배틀 필드)")]
+        [Tooltip("배틀 필드에서 Y 위치 기반 소팅 오더를 갱신할 배율.\n" +
+                 "기본값 10 → Y가 1 낮아질수록 SortingOrder가 10 높아져 앞에 그려집니다.")]
+        [SerializeField] private float _sortingOrderScale = 10f;
+
         // ─────────────────────────────────────────
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
+        /// <summary>현재 HP</summary>
         private int _currentHp;
+
+        /// <summary>현재 경험치</summary>
         private int _currentExp = 0;
+
+        /// <summary>현재 레벨</summary>
         private int _currentLevel = 1;
+
+        /// <summary>플레이어 Transform (탐색 필드 추종 대상)</summary>
         private Transform _playerTransform;
+
+        /// <summary>탐색 필드 추종 활성 여부</summary>
         private bool _isFollowing = false;
+
+        /// <summary>무적 상태 여부 (콤보 연출 중 피격 방지)</summary>
         private bool _isInvincible = false;
+
+        /// <summary>Rigidbody2D 캐시</summary>
         private Rigidbody2D _rb;
+
+        /// <summary>
+        /// 배틀 진입 전 원래 gravityScale 저장값.
+        /// ExitBattlePhysics()에서 복원에 사용합니다.
+        /// </summary>
+        private float _savedGravityScale = 1f;
+
+        /// <summary>
+        /// 현재 배틀 물리 모드 여부.
+        /// true이면 Kinematic + gravityScale=0 상태입니다.
+        /// </summary>
+        private bool _isBattlePhysics = false;
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
+        /// <summary>현재 HP</summary>
         public int CurrentHp => _currentHp;
+
+        /// <summary>최대 HP</summary>
         public int MaxHp => _maxHp;
+
+        /// <summary>현재 레벨</summary>
         public int CurrentLevel => _currentLevel;
+
+        /// <summary>현재 경험치</summary>
         public int CurrentExp => _currentExp;
 
         /// <summary>
@@ -121,7 +160,7 @@ namespace SENTRY
         /// <summary>
         /// 탐색 필드(2D 사이드뷰) 기준 포메이션 월드 좌표.
         /// 배틀 종료 후 탐색 필드로 복귀할 때의 목표 위치입니다.
-        /// 배틀 필드 내 배치 위치는 FieldManager.SentryBattleSpawnPoints를 사용합니다.
+        /// 배틀 필드 내 배치 위치는 BattleManager._sentryBattleStartPositions를 사용합니다.
         /// </summary>
         public Vector3 FormationWorldPosition
         {
@@ -148,7 +187,13 @@ namespace SENTRY
             IsKnockedOut = false;
             IsOverloaded = false;
             _isInvincible = false;
+            _isBattlePhysics = false;
             _rb = GetComponent<Rigidbody2D>();
+
+            // Awake에서 중력값 저장 (Init보다 먼저 호출되므로 여기서도 캐시)
+            if (_rb != null)
+                _savedGravityScale = _rb.gravityScale;
+
             _isFollowing = true;
 
             Debug.Log($"<color=cyan>[{_sentryName}]</color> 초기화 완료 (Lv.{_currentLevel})");
@@ -158,12 +203,26 @@ namespace SENTRY
         //  유니티 생명주기
         // ─────────────────────────────────────────
 
+        private void Awake()
+        {
+            // gravityScale을 Init 이전에도 안전하게 캐싱
+            _rb = GetComponent<Rigidbody2D>();
+            if (_rb != null)
+                _savedGravityScale = _rb.gravityScale;
+        }
+
         private void Update()
         {
-            // 탐색 필드에서만 추종 이동
+            // ── 탐색 필드: 플레이어 추종 이동 ──
             // 배틀 필드에서는 StopFollowing() 상태이므로 이 블록이 실행되지 않음
-            if (IsKnockedOut || _playerTransform == null || !_isFollowing) return;
-            FollowPlayer();
+            if (!IsKnockedOut && _playerTransform != null && _isFollowing)
+                FollowPlayer();
+
+            // ── 배틀 필드: Y 기반 SortingOrder 갱신 ──
+            // Y가 낮을수록(화면 아래 = 가까이) 앞에 그려집니다.
+            if (_isBattlePhysics && _spriteRenderer != null)
+                _spriteRenderer.sortingOrder =
+                    Mathf.RoundToInt(-transform.position.y * _sortingOrderScale);
         }
 
         // ─────────────────────────────────────────
@@ -176,7 +235,6 @@ namespace SENTRY
         /// </summary>
         private void FollowPlayer()
         {
-            // 2D 사이드뷰 기준 포메이션 목표 위치
             Vector2 targetPos = (Vector2)_playerTransform.position + _formationOffset;
             float dist = Vector2.Distance(transform.position, targetPos);
 
@@ -205,6 +263,93 @@ namespace SENTRY
         /// 배틀 종료 후 탐색 필드 복귀 시 BattleManager / ComboManager가 호출합니다.
         /// </summary>
         public void StartFollowing() => _isFollowing = true;
+
+        // ─────────────────────────────────────────
+        //  페이크 쿼터뷰 물리 전환 (핵심)
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// 배틀 필드 진입 시 BattleManager.PlaceSentriesAtBattleStart()에서 호출합니다.
+        ///
+        /// [동작]
+        ///   1. 현재 gravityScale을 저장합니다. (탐색 필드 복귀 시 복원)
+        ///   2. gravityScale = 0 → 중력에 의한 낙하를 완전히 차단합니다.
+        ///   3. bodyType = Kinematic → 물리 엔진 충돌 계산을 끊습니다.
+        ///      이 상태에서 AI 이동은 MovePosition()으로 처리합니다.
+        ///   4. linearVelocity = 0 → 기존 운동량을 초기화합니다.
+        ///
+        /// [주의]
+        ///   반드시 DOMove 호출 이전에 실행해야 합니다.
+        ///   그렇지 않으면 DOMove 도중 중력에 끌려 내려가는 현상이 발생합니다.
+        /// </summary>
+        public void EnterBattlePhysics()
+        {
+            if (_rb == null) return;
+
+            _savedGravityScale = _rb.gravityScale;      // 탐색 복귀 시 복원용
+            _rb.gravityScale = 0f;                    // 중력 OFF
+            _rb.bodyType = RigidbodyType2D.Kinematic;
+            _rb.linearVelocity = Vector2.zero;
+            _isBattlePhysics = true;
+
+            Debug.Log($"[{_sentryName}] EnterBattlePhysics — Kinematic 전환 완료");
+        }
+
+        /// <summary>
+        /// 탐색 필드 복귀 시 BattleManager.EndBattle()에서 호출합니다.
+        ///
+        /// [동작]
+        ///   1. bodyType = Dynamic → 물리 엔진 제어로 복귀합니다.
+        ///   2. gravityScale을 저장했던 원래 값으로 복원합니다.
+        ///      (Inspector에서 설정한 값이 그대로 유지됩니다.)
+        ///
+        /// [주의]
+        ///   ExplorationFieldRoot가 활성화되기 전에 호출해야
+        ///   복귀 위치에서 바닥으로 자연스럽게 착지합니다.
+        /// </summary>
+        public void ExitBattlePhysics()
+        {
+            if (_rb == null) return;
+
+            _rb.bodyType = RigidbodyType2D.Dynamic;
+            _rb.gravityScale = _savedGravityScale;    // 원래 중력값 복원
+            _isBattlePhysics = false;
+
+            // SortingOrder를 기본값으로 복원 (탐색 필드는 정적 정렬)
+            if (_spriteRenderer != null)
+                _spriteRenderer.sortingOrder = 0;
+
+            Debug.Log($"[{_sentryName}] ExitBattlePhysics — Dynamic 복원 완료");
+        }
+
+        /// <summary>
+        /// 배틀 필드(Kinematic 상태)에서 목표 방향으로 이동합니다.
+        /// 자식 클래스의 HandleBattleAI()에서 linearVelocity 대신 이 메서드를 호출하세요.
+        ///
+        /// [설계 이유]
+        ///   Kinematic 상태에서는 linearVelocity 할당이 무시됩니다.
+        ///   MovePosition은 Kinematic에서도 정상 동작하며,
+        ///   물리 보간이 적용되어 부드러운 이동이 보장됩니다.
+        /// </summary>
+        /// <param name="direction">이동 방향 벡터 (normalized 권장)</param>
+        /// <param name="speed">이동 속도 (units/sec)</param>
+        public void BattleMove(Vector2 direction, float speed)
+        {
+            if (_rb == null || !_isBattlePhysics) return;
+            _rb.MovePosition(_rb.position + direction * speed * Time.fixedDeltaTime);
+        }
+
+        /// <summary>
+        /// 배틀 필드에서 이동을 즉시 멈춥니다.
+        /// Kinematic 상태에서 linearVelocity=0은 무의미하므로 이 메서드를 사용하세요.
+        /// (DOTween이 위치를 제어 중일 때는 호출 불필요)
+        /// </summary>
+        public void BattleStop()
+        {
+            if (_rb == null) return;
+            if (_isBattlePhysics)
+                _rb.linearVelocity = Vector2.zero; // Kinematic에서도 안전 처리
+        }
 
         // ─────────────────────────────────────────
         //  체력 처리
@@ -281,9 +426,13 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  기절
+        //  기절 (KO)
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// HP가 0이 되면 내부에서 호출됩니다.
+        /// 배틀 AI를 멈추고 쉼터 부활 대기 상태로 전환합니다.
+        /// </summary>
         private void KnockOut()
         {
             IsKnockedOut = true;
@@ -345,99 +494,53 @@ namespace SENTRY
             OverloadDamageMultiplier = on ? damageMultiplier : 1f;
             OverloadSpeedMultiplier = on ? speedMultiplier : 1f;
 
-            if (_spriteRenderer == null) return;
-
-            if (on)
-            {
-                _spriteRenderer.DOKill();
-                _spriteRenderer.DOColor(Color.red, 0.1f).SetLoops(-1, LoopType.Yoyo);
-                transform.DOPunchScale(Vector3.one * 0.25f, 0.4f, 6, 0.5f);
-                Debug.Log($"<color=red>[{_sentryName} 과부화 ON]</color> " +
-                          $"공격력 x{damageMultiplier} / 속도 x{speedMultiplier}");
-            }
-            else
-            {
-                _spriteRenderer.DOKill();
-                _spriteRenderer.color = Color.white;
-                Debug.Log($"[{_sentryName}] 과부화 해제");
-            }
+            if (_spriteRenderer != null)
+                _spriteRenderer.color = on ? Color.red : Color.white;
         }
 
         // ─────────────────────────────────────────
-        //  경험치 / 레벨 (SentryGrowthDataSO 연동)
+        //  경험치 / 레벨업
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 경험치를 획득합니다.
-        /// 배틀 필드 종료 후 BattleManager.DistributeExp()에서 호출합니다.
+        /// 경험치를 추가합니다. 레벨업 조건 충족 시 LevelUp()을 호출합니다.
+        /// Enemy.Die()에서 GainExp()를 통해 간접 호출됩니다.
         /// </summary>
-        public void GainExp(int amount)
+        public void AddExp(int amount)
         {
-            int maxLvl = _growthData != null ? _growthData.maxLevel : _maxLevel;
-            if (_currentLevel >= maxLvl) return;
+            if (IsKnockedOut) return;
 
             _currentExp += amount;
-            int required = RequiredExp;
+            Debug.Log($"[{_sentryName}] EXP +{amount} ({_currentExp}/{RequiredExp})");
 
-            if (_currentExp >= required)
+            while (_currentExp >= RequiredExp && _currentLevel < MaxLevel)
             {
-                _currentExp -= required;
+                _currentExp -= RequiredExp;
                 LevelUp();
             }
-
-            Debug.Log($"[{_sentryName}] EXP +{amount} ({_currentExp}/{RequiredExp})");
         }
 
         /// <summary>
-        /// 레벨업 처리. GrowthData 기반으로 HP를 증가시킵니다.
-        /// 자식 클래스에서 Override하여 고유 스탯(공격력/속도 등)을 추가 증가시킵니다.
+        /// 레벨업 처리. 자식 클래스에서 override하여 추가 스탯 상승 로직을 작성합니다.
         /// </summary>
         protected virtual void LevelUp()
         {
             _currentLevel++;
-
-            float hpMult = _growthData != null ? _growthData.hpMultiplierPerLevel : 1.1f;
-            _maxHp = Mathf.RoundToInt(_maxHp * hpMult);
+            _maxHp = Mathf.RoundToInt(_maxHp * 1.1f);
             _currentHp = _maxHp;
 
-            Debug.Log($"<color=yellow>[{_sentryName} 레벨업!]</color> " +
-                      $"Lv.{_currentLevel} / 최대 HP: {_maxHp}");
+            transform.DOPunchScale(Vector3.one * 0.4f, 0.4f, 5, 0.5f);
+            if (_spriteRenderer != null)
+                _spriteRenderer.DOColor(Color.yellow, 0.1f)
+                    .SetLoops(6, LoopType.Yoyo)
+                    .OnComplete(() =>
+                    {
+                        if (_spriteRenderer != null)
+                            _spriteRenderer.color = Color.white;
+                    });
 
-            transform.DOPunchScale(Vector3.one * 0.3f, 0.4f, 5, 0.5f);
-
-            // UIManager 레벨업 연출 호출
-            if (UIManager.Instance != null)
-                UIManager.Instance.PlayLevelUpEffect(_sentryName, _currentLevel);
+            UIManager.Instance?.PlayLevelUpEffect(_sentryName, _currentLevel);
+            Debug.Log($"<color=yellow>[{_sentryName} 레벨업!]</color> Lv.{_currentLevel}");
         }
-
-        /// <summary>GrowthData 공격력 증가 배율 반환. 자식 클래스 LevelUp()에서 사용.</summary>
-        protected float GetDamageMultiplier() =>
-            _growthData != null ? _growthData.damageMultiplierPerLevel : 1.1f;
-
-        /// <summary>GrowthData 속도 증가량 반환. 자식 클래스 LevelUp()에서 사용.</summary>
-        protected float GetSpeedBonus() =>
-            _growthData != null ? _growthData.speedBonusPerLevel : 0.1f;
-
-        /// <summary>GrowthData 스킬 게이지 충전량 증가값 반환.</summary>
-        protected float GetSkillGaugeBonus() =>
-            _growthData != null ? _growthData.skillGaugeBonusPerLevel : 2f;
-
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            // 추종 정지 반경 (하늘색) - 탐색 필드용
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawWireSphere(transform.position, _followStopDistance);
-
-            // 탐색 필드 포메이션 목표 위치 (녹색) - 플레이 중에만
-            if (Application.isPlaying && _playerTransform != null)
-            {
-                Gizmos.color = Color.green;
-                Vector3 fp = FormationWorldPosition;
-                Gizmos.DrawSphere(fp, 0.15f);
-                Gizmos.DrawLine(transform.position, fp);
-            }
-        }
-#endif
     }
 }

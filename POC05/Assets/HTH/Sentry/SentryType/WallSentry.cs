@@ -6,10 +6,11 @@ namespace SENTRY
     /// <summary>
     /// 벽(방어/압박) 센트리 소환수.
     ///
-    /// [변경 사항 - Session 4]
-    /// - UseSkill() 연출을 SkillEffect_Wall.PlaySkill()에 위임합니다.
-    /// - Session 3에서 TODO였던 Enemy.Stun() 호출이 완성되었습니다.
-    /// - 충격 시점의 데미지 + 기절 처리는 onImpact 콜백으로 전달합니다.
+    /// [변경 사항 - 페이크 쿼터뷰 대응]
+    /// - HandleBattleAI() 내부의 _rigid2D.linearVelocity 직접 할당을
+    ///   SentryBase.BattleMove() 호출로 교체했습니다.
+    /// - TryPush()의 적 밀치기도 enemyRb.AddForce → DOTween.DOMove로 교체했습니다.
+    ///   Kinematic 상태의 적에게 AddForce는 효과가 없기 때문입니다.
     ///
     /// [히어라키 위치]
     /// Sentries
@@ -37,11 +38,17 @@ namespace SENTRY
         [Tooltip("기본 공격 쿨타임 (초)")]
         [SerializeField] private float _attackCooldown = 2f;
 
-        [Tooltip("기본 밀치기 힘")]
-        [SerializeField] private float _pushForce = 6f;
+        [Tooltip("적을 밀쳐내는 거리 (DOTween 이동량 — Kinematic 적 전용)")]
+        [SerializeField] private float _pushDistance = 2.5f;
+
+        [Tooltip("밀치기 이동에 걸리는 시간 (초)")]
+        [SerializeField] private float _pushDuration = 0.25f;
 
         [Tooltip("적 레이어")]
         [SerializeField] private LayerMask _enemyLayer;
+
+        [Tooltip("적에게 접근하는 이동 속도 (BattleMove에 사용)")]
+        [SerializeField] private float _approachSpeed = 2f;
 
         [Header("스킬 설정")]
         [Tooltip("스킬 게이지 최대치")]
@@ -56,8 +63,8 @@ namespace SENTRY
         [Tooltip("스킬 밀치기 데미지 배율")]
         [SerializeField] private float _skillDamageMultiplier = 2.5f;
 
-        [Tooltip("스킬 밀치기 힘 배율")]
-        [SerializeField] private float _skillPushForceMultiplier = 2f;
+        [Tooltip("스킬 밀치기 거리 배율")]
+        [SerializeField] private float _skillPushDistanceMultiplier = 2f;
 
         [Header("컴포넌트 참조")]
         [Tooltip("벽 스킬 연출 컴포넌트. 같은 오브젝트에 붙어 있어야 합니다.")]
@@ -67,10 +74,19 @@ namespace SENTRY
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
+        /// <summary>현재 추적 중인 적 Transform</summary>
         private Transform _currentTarget;
+
+        /// <summary>마지막 공격 시각 (Time.time)</summary>
         private float _lastAttackTime;
+
+        /// <summary>현재 스킬 게이지 누적량</summary>
         private float _currentSkillGauge = 0f;
+
+        /// <summary>배틀 AI 활성 여부</summary>
         private bool _isInBattle = false;
+
+        /// <summary>Rigidbody2D 캐시</summary>
         private Rigidbody2D _rigid2D;
 
         // ─────────────────────────────────────────
@@ -87,6 +103,7 @@ namespace SENTRY
         //  초기화
         // ─────────────────────────────────────────
 
+        /// <summary>SentryBase.Init() 이후 WallSentry 전용 초기화를 수행합니다.</summary>
         public override void Init(Transform player)
         {
             base.Init(player);
@@ -135,6 +152,7 @@ namespace SENTRY
         //  전투 AI
         // ─────────────────────────────────────────
 
+        /// <summary>범위 내 가장 가까운 적을 탐색합니다.</summary>
         private void FindTarget()
         {
             Collider2D[] hits = Physics2D.OverlapCircleAll(
@@ -144,30 +162,44 @@ namespace SENTRY
 
             float minDist = float.MaxValue;
             Transform closest = null;
+
             foreach (var col in hits)
             {
                 float d = Vector2.Distance(transform.position, col.transform.position);
                 if (d < minDist) { minDist = d; closest = col.transform; }
             }
+
             _currentTarget = closest;
         }
 
+        /// <summary>
+        /// 적에게 접근하고 근접 시 밀치기를 시도합니다.
+        ///
+        /// [페이크 쿼터뷰 대응]
+        ///   linearVelocity 직접 할당 → BattleMove() 호출로 변경.
+        ///   BattleStop() 호출로 이동 중단도 Kinematic 안전 처리.
+        /// </summary>
         private void HandleBattleAI()
         {
             if (_currentTarget == null)
             {
-                if (_rigid2D != null) _rigid2D.linearVelocity = Vector2.zero;
+                BattleStop();
                 return;
             }
 
             float dist = Vector2.Distance(transform.position, _currentTarget.position);
-            Vector2 dir = ((Vector2)_currentTarget.position - (Vector2)transform.position).normalized;
+            Vector2 dir = ((Vector2)_currentTarget.position
+                           - (Vector2)transform.position).normalized;
 
             if (dist > 1.0f)
-                _rigid2D.linearVelocity = dir * 2f;
+            {
+                // 적에게 접근
+                BattleMove(dir, _approachSpeed * OverloadSpeedMultiplier);
+            }
             else
             {
-                _rigid2D.linearVelocity = Vector2.zero;
+                // 근접 범위 — 정지 후 밀치기
+                BattleStop();
                 TryPush();
             }
         }
@@ -176,6 +208,14 @@ namespace SENTRY
         //  기본 공격 (밀치기)
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 쿨타임이 지났으면 밀치기 공격을 실행합니다.
+        ///
+        /// [페이크 쿼터뷰 대응]
+        ///   기존 enemyRb.AddForce → DOTween.DOMove로 교체.
+        ///   적도 Kinematic 상태이므로 AddForce가 동작하지 않습니다.
+        ///   DOMove로 적을 밀쳐내는 방향으로 이동시킵니다.
+        /// </summary>
         private void TryPush()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
@@ -185,29 +225,37 @@ namespace SENTRY
 
             Enemy enemy = _currentTarget.GetComponent<Enemy>();
             if (enemy != null)
-                enemy.TakeDamage(_pushDamage, HitType.Strike, transform.position);
+                enemy.TakeDamage(
+                    Mathf.RoundToInt(_pushDamage * OverloadDamageMultiplier),
+                    HitType.Strike,
+                    transform.position);
 
-            Rigidbody2D enemyRb = _currentTarget.GetComponent<Rigidbody2D>();
-            if (enemyRb != null)
-            {
-                Vector2 pushDir = (_currentTarget.position - transform.position).normalized;
-                enemyRb.AddForce(pushDir * _pushForce, ForceMode2D.Impulse);
-            }
+            // 밀치기 방향 계산 후 DOMove로 적을 밀어냄 (Kinematic 안전)
+            Vector3 pushDir =
+                (_currentTarget.position - transform.position).normalized;
+            Vector3 pushTarget = _currentTarget.position + pushDir * _pushDistance;
 
-            Vector3 punchDir = (_currentTarget.position - transform.position).normalized * 0.4f;
+            _currentTarget.DOMove(pushTarget, _pushDuration).SetEase(Ease.OutQuart);
+
+            // 밀치기 타격 연출
+            Vector3 punchDir =
+                (_currentTarget.position - transform.position).normalized * 0.4f;
             transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
 
             ChargeSkillGauge(_skillGaugePerAttack);
-            Debug.Log($"[{SentryName}] 밀치기 공격! 데미지: {_pushDamage}");
+            Debug.Log($"[{SentryName}] 밀치기 공격! 데미지: " +
+                      $"{Mathf.RoundToInt(_pushDamage * OverloadDamageMultiplier)}");
         }
 
         // ─────────────────────────────────────────
         //  스킬 게이지
         // ─────────────────────────────────────────
 
+        /// <summary>스킬 게이지를 충전하고 가득 차면 스킬을 발동합니다.</summary>
         private void ChargeSkillGauge(float amount)
         {
-            _currentSkillGauge = Mathf.Min(_currentSkillGauge + amount, _maxSkillGauge);
+            _currentSkillGauge =
+                Mathf.Min(_currentSkillGauge + amount, _maxSkillGauge);
 
             if (_currentSkillGauge >= _maxSkillGauge
                 && (_skillEffect == null || !_skillEffect.IsPlaying))
@@ -218,29 +266,32 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  고유 스킬 (강한 밀치기 + 기절) - SkillEffect_Wall 연동
+        //  고유 스킬 (강한 밀치기 + 기절) — SkillEffect_Wall 연동
         // ─────────────────────────────────────────
 
         /// <summary>
         /// [고유 스킬] SkillEffect_Wall에 연출을 위임하고,
         /// 충격 시점에 데미지 + 기절(Stun) 콜백을 전달합니다.
-        /// Session 3의 TODO였던 Enemy.Stun() 호출이 여기서 완성됩니다.
         /// </summary>
         private void UseSkill()
         {
             if (_currentTarget == null) return;
+
             if (_skillEffect == null)
             {
                 FallbackSkillPush();
                 return;
             }
 
-            int skillDamage = Mathf.RoundToInt(_pushDamage * _skillDamageMultiplier);
-            float skillPushForce = _pushForce * _skillPushForceMultiplier;
+            int skillDamage =
+                Mathf.RoundToInt(_pushDamage * _skillDamageMultiplier
+                                            * OverloadDamageMultiplier);
+            float skillPushDist = _pushDistance * _skillPushDistanceMultiplier;
             Transform capturedTarget = _currentTarget;
             float stunDuration = _stunDuration;
 
-            Debug.Log($"<color=yellow>[{SentryName} 스킬 발동!]</color> 강한 밀치기 + {stunDuration}초 기절");
+            Debug.Log($"<color=yellow>[{SentryName} 스킬 발동!]</color> " +
+                      $"강한 밀치기 + {stunDuration}초 기절");
 
             _skillEffect.PlaySkill(
                 capturedTarget,
@@ -248,22 +299,24 @@ namespace SENTRY
                 {
                     if (capturedTarget == null) return;
 
-                    // 데미지 적용
                     Enemy enemy = capturedTarget.GetComponent<Enemy>();
                     if (enemy != null)
                     {
                         enemy.TakeDamage(skillDamage, HitType.Strike, transform.position);
-                        // Session 3 TODO 완성: Enemy.Stun() 호출
                         enemy.Stun(stunDuration);
                     }
 
-                    // 강한 밀치기 힘
-                    Rigidbody2D enemyRb = capturedTarget.GetComponent<Rigidbody2D>();
-                    if (enemyRb != null)
-                    {
-                        Vector2 pushDir = (capturedTarget.position - transform.position).normalized;
-                        enemyRb.AddForce(pushDir * skillPushForce, ForceMode2D.Impulse);
-                    }
+                    // 스킬도 Kinematic 대응 — DOMove로 강하게 밀어냄
+                    Vector3 pushDir =
+                        (capturedTarget.position - transform.position).normalized;
+                    Vector3 pushTarget =
+                        capturedTarget.position + pushDir * skillPushDist;
+
+                    capturedTarget.DOMove(pushTarget, _pushDuration * 0.5f)
+                                  .SetEase(Ease.OutExpo);
+
+                    // 스킬 사용 완료 → 콤보 게이지 충전 통보
+                    ComboManager.Instance?.OnSentrySkillUsed();
                 }
             );
         }
@@ -272,26 +325,37 @@ namespace SENTRY
         private void FallbackSkillPush()
         {
             if (_currentTarget == null) return;
-            int skillDamage = Mathf.RoundToInt(_pushDamage * _skillDamageMultiplier);
+
+            int dmg = Mathf.RoundToInt(_pushDamage * _skillDamageMultiplier
+                                                     * OverloadDamageMultiplier);
             Enemy e = _currentTarget.GetComponent<Enemy>();
             if (e != null)
             {
-                e.TakeDamage(skillDamage, HitType.Strike, transform.position);
+                e.TakeDamage(dmg, HitType.Strike, transform.position);
                 e.Stun(_stunDuration);
             }
+
+            Vector3 pushDir =
+                (_currentTarget.position - transform.position).normalized;
+            Vector3 pushTarget =
+                _currentTarget.position + pushDir * _pushDistance * _skillPushDistanceMultiplier;
+
+            _currentTarget.DOMove(pushTarget, _pushDuration).SetEase(Ease.OutExpo);
         }
 
         // ─────────────────────────────────────────
         //  레벨업 (Override)
         // ─────────────────────────────────────────
 
+        /// <summary>레벨업 시 방어/압박 스탯을 추가 강화합니다.</summary>
         protected override void LevelUp()
         {
             base.LevelUp();
             _stunDuration += 0.2f;
             _blockRange += 0.1f;
             _pushDamage = Mathf.RoundToInt(_pushDamage * 1.1f);
-            Debug.Log($"[{SentryName}] 기절 시간: {_stunDuration:F1}초 / 범위: {_blockRange:F1}");
+            Debug.Log($"[{SentryName}] 기절 시간: {_stunDuration:F1}초 / " +
+                      $"범위: {_blockRange:F1} / 데미지: {_pushDamage}");
         }
 
 #if UNITY_EDITOR
