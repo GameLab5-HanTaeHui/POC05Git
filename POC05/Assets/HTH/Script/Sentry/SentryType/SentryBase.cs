@@ -480,6 +480,9 @@ namespace SENTRY
 
             Debug.Log($"<color=red>[{_sentryName} KO]</color> " +
                       "기절 — 탐색 필드 쉼터에서 부활 가능");
+
+            // 배틀 매니저에 KO 통보 → 전원 KO 시 패배 처리
+            BattleManager.Instance?.OnSentryKnockedOut();
         }
 
         /// <summary>과부화 종료 후 PlayerAbility가 강제 기절 시 호출합니다.</summary>

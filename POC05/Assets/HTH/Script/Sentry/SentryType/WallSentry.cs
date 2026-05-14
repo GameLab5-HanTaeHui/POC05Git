@@ -219,27 +219,40 @@ namespace SENTRY
         private void TryPush()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
+
+            // ── null / 파괴된 오브젝트 이중 안전 체크 ──
+            // FindTarget()과 TryPush() 사이 프레임에 적이 Die()로 파괴될 수 있으므로
+            // Transform 뿐 아니라 gameObject 활성 여부까지 확인합니다.
             if (_currentTarget == null) return;
+            if (!_currentTarget.gameObject.activeInHierarchy) { _currentTarget = null; return; }
+
+            Enemy enemy = _currentTarget.GetComponent<Enemy>();
+
+            // Enemy 컴포넌트가 없거나 이미 사망 처리 중이면 타겟 무효화 후 중단
+            if (enemy == null || enemy.IsDead) { _currentTarget = null; return; }
 
             _lastAttackTime = Time.time;
 
-            Enemy enemy = _currentTarget.GetComponent<Enemy>();
-            if (enemy != null)
-                enemy.TakeDamage(
-                    Mathf.RoundToInt(_pushDamage * OverloadDamageMultiplier),
-                    HitType.Strike,
-                    transform.position);
+            // 데미지 적용
+            enemy.TakeDamage(
+                Mathf.RoundToInt(_pushDamage * OverloadDamageMultiplier),
+                HitType.Strike,
+                transform.position);
 
-            // 밀치기 방향 계산 후 DOMove로 적을 밀어냄 (Kinematic 안전)
-            Vector3 pushDir =
-                (_currentTarget.position - transform.position).normalized;
-            Vector3 pushTarget = _currentTarget.position + pushDir * _pushDistance;
+            // 밀치기 DOMove — 데미지 후에도 오브젝트가 살아있을 때만 실행
+            // Die() 애니메이션 중에 DOMove를 추가로 실행하면 충돌이 발생합니다.
+            if (!enemy.IsDead && _currentTarget != null)
+            {
+                Vector3 pushDir = (_currentTarget.position - transform.position).normalized;
+                Vector3 pushTarget = _currentTarget.position + pushDir * _pushDistance;
+                _currentTarget.DOMove(pushTarget, _pushDuration).SetEase(Ease.OutQuart);
+            }
 
-            _currentTarget.DOMove(pushTarget, _pushDuration).SetEase(Ease.OutQuart);
-
-            // 밀치기 타격 연출
+            // 밀치기 타격 연출 (WallSentry 자신)
             Vector3 punchDir =
-                (_currentTarget.position - transform.position).normalized * 0.4f;
+                (_currentTarget != null
+                    ? (_currentTarget.position - transform.position).normalized
+                    : transform.right) * 0.4f;
             transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
 
             ChargeSkillGauge(_skillGaugePerAttack);

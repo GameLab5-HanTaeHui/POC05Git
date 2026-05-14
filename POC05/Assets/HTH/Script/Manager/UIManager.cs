@@ -506,5 +506,28 @@ namespace SENTRY
                 return _wallLevelText;
             return null;
         }
+
+        // TODO 목록
+
+        public void ShowVictoryPanel(BattleResultData data)
+        {
+
+        }
+        public void ShowDefeatPanel()
+        {
+
+        }
+        public void HideResultPanels()
+        {
+
+        }
+        public void ShowEncounterPanel(BattleEncounterDataSO data, BattleTrigger tirgger)
+        {
+
+        }
+        public void HideEncounterPanel()
+        {
+
+        }
     }
 }
