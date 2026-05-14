@@ -176,7 +176,11 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 센트리를 초기화합니다. 소환 직후 반드시 호출하세요.
+        /// 센트리 최초 소환 시 1회 호출합니다.
+        /// HP / EXP / 레벨을 초기값으로 설정합니다.
+        ///
+        /// [주의] 배틀 진입마다 호출하면 레벨·EXP가 리셋됩니다.
+        ///        배틀 진입 시에는 SetupForBattle()을 사용하세요.
         /// </summary>
         public virtual void Init(Transform player)
         {
@@ -190,7 +194,6 @@ namespace SENTRY
             _isBattlePhysics = false;
             _rb = GetComponent<Rigidbody2D>();
 
-            // Awake에서 중력값 저장 (Init보다 먼저 호출되므로 여기서도 캐시)
             if (_rb != null)
                 _savedGravityScale = _rb.gravityScale;
 
@@ -199,16 +202,46 @@ namespace SENTRY
             Debug.Log($"<color=cyan>[{_sentryName}]</color> 초기화 완료 (Lv.{_currentLevel})");
         }
 
+        /// <summary>
+        /// 배틀 필드 진입 시 매번 호출합니다.
+        /// 레벨·EXP는 유지하고, 전투 상태 플래그만 초기화합니다.
+        /// BattleManager.BattleStartRoutine() 이전에 호출하세요.
+        /// </summary>
+        public void SetupForBattle(Transform player)
+        {
+            // 플레이어 Transform 갱신 (탐색 필드 복귀 시 참조용)
+            if (player != null) _playerTransform = player;
+
+            // 전투 상태 플래그만 초기화 — 레벨·EXP·HP는 그대로 유지
+            IsOverloaded = false;
+            _isInvincible = false;
+            _isBattlePhysics = false;
+
+            // Rigidbody2D 캐시 (씬 재로드 대비)
+            if (_rb == null)
+            {
+                _rb = GetComponent<Rigidbody2D>();
+                if (_rb != null) _savedGravityScale = _rb.gravityScale;
+            }
+
+            Debug.Log($"[{_sentryName}] 배틀 준비 완료 " +
+                      $"— Lv.{_currentLevel} / HP:{_currentHp}/{_maxHp} / EXP:{_currentExp}");
+        }
+
         // ─────────────────────────────────────────
         //  유니티 생명주기
         // ─────────────────────────────────────────
 
         private void Awake()
         {
-            // gravityScale을 Init 이전에도 안전하게 캐싱
+            // Rigidbody2D + gravityScale 캐싱
             _rb = GetComponent<Rigidbody2D>();
             if (_rb != null)
                 _savedGravityScale = _rb.gravityScale;
+
+            // ★ _currentHp를 Awake에서 초기화
+            // Init()이 호출되지 않아도 HP 바가 0으로 표시되는 문제를 방지합니다.
+            _currentHp = _maxHp;
         }
 
         private void Update()

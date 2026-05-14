@@ -79,9 +79,6 @@ namespace SENTRY
         /// <summary>플레이어 Transform</summary>
         private Transform _playerTransform;
 
-        /// <summary>플레이어 체력 컴포넌트</summary>
-        private PlayerHealth _playerHealth;
-
         /// <summary>현재 실행 중인 인카운터 데이터</summary>
         private BattleEncounterDataSO _currentEncounterData;
 
@@ -130,7 +127,6 @@ namespace SENTRY
             }
 
             _playerTransform = player;
-            _playerHealth = player.GetComponentInChildren<PlayerHealth>();
             _isInBattle = true;
             _currentKillCount = 0;
             _currentEncounterData = encounterData;
@@ -152,13 +148,19 @@ namespace SENTRY
         /// </summary>
         private IEnumerator BattleStartRoutine()
         {
-            // ① 물리 전환 + 스폰 위치 이동 (DOMove 이전에 반드시 Kinematic 전환)
+            // ① 배틀 상태 플래그 초기화 (레벨·EXP·HP는 유지)
+            // Init()은 최초 소환 시 1회만 호출 — 배틀 재진입 시에는 SetupForBattle() 사용
+            if (_strikeSentry != null) _strikeSentry.SetupForBattle(_playerTransform);
+            if (_shootSentry != null) _shootSentry.SetupForBattle(_playerTransform);
+            if (_wallSentry != null) _wallSentry.SetupForBattle(_playerTransform);
+
+            // ② 물리 전환 + 스폰 위치 이동 (DOMove 이전에 반드시 Kinematic 전환)
             PlaceSentriesAtBattleStart();
 
-            // ② 등장 연출 대기
+            // ③ 등장 연출 대기
             yield return new WaitForSeconds(_battleStartDelay);
 
-            // ③ 각 센트리 전투 AI 활성화
+            // ④ 각 센트리 전투 AI 활성화
             if (_strikeSentry != null && !_strikeSentry.IsKnockedOut)
                 _strikeSentry.EnterBattle();
             if (_shootSentry != null && !_shootSentry.IsKnockedOut)
@@ -166,7 +168,7 @@ namespace SENTRY
             if (_wallSentry != null && !_wallSentry.IsKnockedOut)
                 _wallSentry.EnterBattle();
 
-            // ④ EnemySpawner에 인카운터 데이터 전달 → 적 소환 시작
+            // ⑤ EnemySpawner에 인카운터 데이터 전달 → 적 소환 시작
             if (_enemySpawner != null)
                 _enemySpawner.SpawnStart(_currentEncounterData, _playerTransform);
         }
