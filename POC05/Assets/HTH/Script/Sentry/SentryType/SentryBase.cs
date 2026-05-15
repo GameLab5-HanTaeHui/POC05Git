@@ -187,7 +187,6 @@ namespace SENTRY
             if (player != null) _playerTransform = player;
             IsOverloaded = false;
             _isInvincible = false;
-            _isBattlePhysics = false;
             _isInBattleField = true;   // Y 보정 시작 — DOMove 등장 연출 중에도 적용
             if (_rb == null)
             {

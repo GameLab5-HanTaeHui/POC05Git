@@ -8,21 +8,33 @@ namespace SENTRY
     /// <summary>
     /// 배틀 필드 전투를 조율하는 싱글턴 매니저.
     ///
-    /// [새로운 진입 흐름에서의 역할]
+    /// [물리 전환 흐름 정리]
     ///
-    ///   FieldManager.BattleSequenceRoutine()이 낙하 연출과 선택창을 담당합니다.
-    ///   [전투하기] 선택 → FieldManager.OnFightChosen() → 카운트다운
-    ///   → BattleManager.StartBattle() 호출 (이 클래스)
+    ///   FieldManager.SetupSentriesForDrop()
+    ///     → EnterBattlePhysics() : Kinematic ON, gravityScale = 0
+    ///     → SetupForBattle()     : 전투 플래그 설정 (_isBattlePhysics는 건드리지 않음)
     ///
-    ///   BattleManager는 전투 진행(AI 활성화, 킬카운트, 승패 판정)만 담당합니다.
-    ///   센트리 낙하 연출, 적 낙하 소환은 FieldManager / EnemySpawner가 담당합니다.
+    ///   BattleManager.BattleStartRoutine()
+    ///     → SetupForBattle() 호출 없음 (Kinematic 상태를 건드리지 않음)
+    ///     → EnterBattle() : AI 활성화만 수행
     ///
-    /// [StartBattle() 역할]
-    ///   센트리는 이미 낙하 완료 상태이므로 DOMove 등장 연출 없이
-    ///   SetupForBattle() → EnterBattle(AI 활성) → SpawnStart(순환 소환)만 실행합니다.
+    ///   BattleManager.EndBattle()
+    ///     → ExitBattlePhysics() : Dynamic 복원, gravityScale 복원
+    ///
+    /// [소환 흐름]
+    ///   SpawnWithDropEffect() 1회가 전부. 추가 소환 없음.
+    ///
+    /// [히어라키 위치]
+    /// --- Managers ---
+    ///   └── BattleManager (이 스크립트)
     /// </summary>
     public class BattleManager : MonoBehaviour
     {
+        // ─────────────────────────────────────────
+        //  싱글턴
+        // ─────────────────────────────────────────
+
+        /// <summary>씬 어디서든 BattleManager.Instance로 접근합니다.</summary>
         public static BattleManager Instance { get; private set; }
 
         // ─────────────────────────────────────────
@@ -30,11 +42,18 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         [Header("센트리 참조")]
+        [Tooltip("타격 센트리")]
         [SerializeField] private StrikeSentry _strikeSentry;
+
+        [Tooltip("사격 센트리")]
         [SerializeField] private ShootSentry _shootSentry;
+
+        [Tooltip("벽 센트리")]
         [SerializeField] private WallSentry _wallSentry;
 
         [Header("스포너 참조")]
+        [Tooltip("배틀 필드의 EnemySpawner 컴포넌트.\n" +
+                 "EndBattle 시 SpawnStop() 호출용으로만 사용합니다.")]
         [SerializeField] private EnemySpawner _enemySpawner;
 
         // ─────────────────────────────────────────
@@ -73,8 +92,10 @@ namespace SENTRY
         /// <summary>
         /// [전투하기] 선택 → FieldManager.CountdownAndStartBattle() → 이 메서드 호출.
         ///
-        /// 센트리와 적은 이미 낙하 완료 상태이므로
-        /// DOMove 등장 연출 없이 AI 활성화 → 지속 소환 시작 순서로 진행합니다.
+        /// 센트리는 이미 FieldManager.SetupSentriesForDrop()에서
+        /// EnterBattlePhysics() → SetupForBattle() 완료 상태입니다.
+        /// 여기서 SetupForBattle()을 다시 호출하면 _isBattlePhysics가 리셋되므로
+        /// 절대 호출하지 않습니다.
         /// </summary>
         public void StartBattle(Transform player, BattleEncounterDataSO encounterData)
         {
@@ -101,25 +122,42 @@ namespace SENTRY
             StartCoroutine(BattleStartRoutine());
         }
 
+        /// <summary>
+        /// 배틀 시작 루틴.
+        ///
+        /// ★ SetupForBattle() 호출 없음
+        ///   이미 FieldManager에서 EnterBattlePhysics() → SetupForBattle() 완료됨.
+        ///   여기서 다시 호출하면 SentryBase.SetupForBattle() 내부의
+        ///   _isBattlePhysics = false 가 Kinematic을 해제해버립니다.
+        ///   (SentryBase.SetupForBattle()에서도 해당 줄을 제거해야 합니다 — 패치 참고)
+        ///
+        /// [실행 순서]
+        ///   1. 센트리 AI 활성화 (EnterBattle) — _isInBattle = true, StopFollowing()
+        ///   2. 씬 내 모든 Enemy.ActivateBattleAI() — 적 AI 일괄 활성화
+        /// </summary>
         private IEnumerator BattleStartRoutine()
         {
-            // ① 배틀 상태 초기화 (레벨·EXP·HP 유지)
-            // 센트리는 FieldManager.SetupSentriesForDrop()에서 이미 SetupForBattle() 완료
-            // 여기서는 전투 플래그 갱신만 수행
-            if (_strikeSentry != null) _strikeSentry.SetupForBattle(_playerTransform);
-            if (_shootSentry != null) _shootSentry.SetupForBattle(_playerTransform);
-            if (_wallSentry != null) _wallSentry.SetupForBattle(_playerTransform);
+            // ① 센트리 AI 활성화
+            // SetupForBattle()은 FieldManager에서 이미 완료됐으므로 호출하지 않습니다.
+            // EnterBattle()만 호출해 전투 AI를 켭니다.
+            if (_strikeSentry != null && !_strikeSentry.IsKnockedOut)
+                _strikeSentry.EnterBattle();
+            if (_shootSentry != null && !_shootSentry.IsKnockedOut)
+                _shootSentry.EnterBattle();
+            if (_wallSentry != null && !_wallSentry.IsKnockedOut)
+                _wallSentry.EnterBattle();
 
-            // ② 센트리 AI 활성화 (이미 낙하 완료 위치에 있음)
-            if (_strikeSentry != null && !_strikeSentry.IsKnockedOut) _strikeSentry.EnterBattle();
-            if (_shootSentry != null && !_shootSentry.IsKnockedOut) _shootSentry.EnterBattle();
-            if (_wallSentry != null && !_wallSentry.IsKnockedOut) _wallSentry.EnterBattle();
+            // ② 씬 내 모든 Enemy AI 활성화
+            // SpawnWithDropEffect()로 소환된 적들은 _isBattleStarted = false 상태입니다.
+            // ActivateBattleAI() 호출 이후부터 이동·공격이 시작됩니다.
+            Enemy[] enemies = FindObjectsByType<Enemy>(FindObjectsSortMode.None);
+            foreach (Enemy enemy in enemies)
+            {
+                if (!enemy.IsDead)
+                    enemy.ActivateBattleAI();
+            }
 
-            // ③ 지속 소환 시작 (낙하 연출로 소환된 초기 적과 별개로 추가 소환)
-            // SpawnWithDropEffect로 소환된 적은 이미 등록됐으므로
-            // SpawnStart는 필요시 추가 웨이브 소환에 사용합니다.
-            // 인카운터 설계에 따라 비활성화 가능합니다.
-            _enemySpawner?.SpawnStart(_currentEncounterData, _playerTransform);
+            Debug.Log($"[BattleManager] 센트리 AI 활성화 / 적 AI 활성화 — {enemies.Length}마리");
 
             yield return null;
         }
@@ -128,7 +166,10 @@ namespace SENTRY
         //  센트리 KO 체크
         // ─────────────────────────────────────────
 
-        /// <summary>센트리 KO 시 SentryBase.KnockOut()에서 호출합니다.</summary>
+        /// <summary>
+        /// 센트리 KO 시 SentryBase.KnockOut()에서 호출합니다.
+        /// 전원 KO 시 패배 처리합니다.
+        /// </summary>
         public void OnSentryKnockedOut()
         {
             if (!_isInBattle) return;
@@ -148,6 +189,10 @@ namespace SENTRY
         //  적 사망 처리
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 적 사망 시 Enemy.Die()에서 호출합니다.
+        /// 킬 카운트 증가 → 경험치 분배 → 승리 판정 순서로 처리합니다.
+        /// </summary>
         public void OnEnemyDied(int expAmount)
         {
             if (!_isInBattle) return;
@@ -163,12 +208,14 @@ namespace SENTRY
                 EndBattle(isVictory: true);
         }
 
+        /// <summary>획득 경험치를 생존 센트리에게 균등 분배합니다.</summary>
         private void DistributeExp(int totalExp)
         {
             var alive = new List<SentryBase>();
             if (_strikeSentry != null && !_strikeSentry.IsKnockedOut) alive.Add(_strikeSentry);
             if (_shootSentry != null && !_shootSentry.IsKnockedOut) alive.Add(_shootSentry);
             if (_wallSentry != null && !_wallSentry.IsKnockedOut) alive.Add(_wallSentry);
+
             if (alive.Count == 0) return;
 
             int share = Mathf.Max(1, totalExp / alive.Count);
@@ -185,6 +232,10 @@ namespace SENTRY
         //  배틀 종료
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 승리 또는 패배 시 배틀을 종료합니다.
+        /// ExitBattlePhysics()로 센트리 Rigidbody를 Dynamic으로 복원합니다.
+        /// </summary>
         public void EndBattle(bool isVictory)
         {
             if (!_isInBattle) return;
@@ -210,7 +261,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  결산 데이터
+        //  결산 데이터 생성
         // ─────────────────────────────────────────
 
         private BattleResultData BuildBattleResult()
@@ -238,14 +289,19 @@ namespace SENTRY
                 });
             }
 
-            Add(_strikeSentry); Add(_shootSentry); Add(_wallSentry);
+            Add(_strikeSentry);
+            Add(_shootSentry);
+            Add(_wallSentry);
             return result;
         }
 
         // ─────────────────────────────────────────
-        //  결산창/패배 패널 버튼 콜백 (BattleUIManager에서 호출)
+        //  결과 버튼 콜백
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// VictoryPanel [확인] / DefeatPanel [돌아가기] 버튼 클릭 시 호출됩니다.
+        /// </summary>
         public void ReturnToFieldFromResult()
         {
             BattleUIManager.Instance?.HideResultPanels();
@@ -255,10 +311,6 @@ namespace SENTRY
                 _wallSentry?.transform);
         }
     }
-
-    // ─────────────────────────────────────────
-    //  결산 데이터 구조체
-    // ─────────────────────────────────────────
 
     [System.Serializable]
     public class BattleResultData

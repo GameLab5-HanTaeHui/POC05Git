@@ -30,7 +30,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 4.74, y: 0, z: 0}
-  m_LocalScale: {x: 0.3, y: 0.3, z: 1}
+  m_LocalScale: {x: 0.4, y: 0.4, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -179,18 +179,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: daba15a37dfc1f34a8dd085adfc0dc61, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.Enemy
+  _maxHp: 1000
   _level: 1
-  _maxHp: 200
   _moveSpeed: 3
-  _detectionRange: 10
+  _detectionRange: 30
   _attackRange: 1.5
-  _attackDamage: 10
+  _attackDamage: 0
   _attackCooldown: 1
+  _maxSkillGauge: 100
+  _skillGaugePerAttack: 10
   _targetRefreshInterval: 0.5
-  _expOnDeath: 30
   _sentryLayer:
     serializedVersion: 2
     m_Bits: 1024
+  _expOnDeath: 30
   _sortingOrderScale: 50
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4

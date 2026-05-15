@@ -5751,7 +5751,7 @@ MonoBehaviour:
   - {fileID: 1565956654}
   - {fileID: 1741580376}
   - {fileID: 757735353}
-  _sentryDropHeight: 8
+  _sentryDropHeight: 20
   _sentryDropDuration: 0.6
   _sentryDropStagger: 0.2
   _fadeDuration: 0.4
@@ -5759,6 +5759,7 @@ MonoBehaviour:
   _fadePanel: {fileID: 1207656420}
   _countdownDuration: 3
   _playerController: {fileID: 1432970194}
+  _battleCharacterRotationX: -50
 --- !u!4 &516934342
 Transform:
   m_ObjectHideFlags: 0
@@ -5981,8 +5982,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 519420028}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.42261836, y: -0.00000003456981, z: 0.000000016120167, w: 0.90630776}
-  m_LocalPosition: {x: 0, y: -71.660446, z: -6.427876}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: -10}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -7872,7 +7873,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: -5, y: 0, z: 0}
-  m_LocalScale: {x: 0.3, y: 0.3, z: 1}
+  m_LocalScale: {x: 0.4, y: 0.4, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1162690095}
@@ -7922,7 +7923,7 @@ MonoBehaviour:
   _attackRange: 1.2
   _attackCooldown: 1.2
   _chaseSpeed: 3.5
-  _detectionRange: 8
+  _detectionRange: 30
   _maxSkillGauge: 100
   _skillGaugePerAttack: 15
   _skillDamageMultiplier: 2
@@ -13581,7 +13582,6 @@ MonoBehaviour:
   _fightButton: {fileID: 929642488}
   _fleeButton: {fileID: 1028879095}
   _countdownText: {fileID: 693089943}
-  _countdownPanel: {fileID: 0}
   _victoryPanel: {fileID: 21767506}
   _victoryKillText: {fileID: 1756270515}
   _victorySentryStrikeText: {fileID: 89396286}
@@ -19618,8 +19618,9 @@ MonoBehaviour:
   _spriteRenderer: {fileID: 1398330203}
   _sortingOrderScale: 10
   _attackDamage: 20
-  _detectionRange: 10
+  _detectionRange: 30
   _preferredDistance: 5
+  _maxAttackRange: 9
   _attackCooldown: 1.5
   _repositionSpeed: 2
   _enemyLayer:
@@ -19688,7 +19689,7 @@ LineRenderer:
   - {x: 0, y: 0, z: 1}
   m_Parameters:
     serializedVersion: 3
-    widthMultiplier: 1
+    widthMultiplier: 0.1
     widthCurve:
       serializedVersion: 2
       m_Curve:
@@ -19886,7 +19887,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: -7.5, y: 0, z: 0}
-  m_LocalScale: {x: 0.3, y: 0.3, z: 1}
+  m_LocalScale: {x: 0.4, y: 0.4, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1162690095}
@@ -20507,6 +20508,7 @@ MonoBehaviour:
   - {fileID: 1897868181}
   - {fileID: 1968841714}
   - {fileID: 1511100552}
+  _enemyRotationX: -50
 --- !u!1 &1486670094
 GameObject:
   m_ObjectHideFlags: 0
@@ -24261,7 +24263,7 @@ MonoBehaviour:
   _spriteRenderer: {fileID: 1955320330}
   _sortingOrderScale: 10
   _pushDamage: 15
-  _blockRange: 2.5
+  _blockRange: 30
   _attackCooldown: 2
   _pushDistance: 2.5
   _pushDuration: 0.25
@@ -24417,7 +24419,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: -10, y: 0, z: 0}
-  m_LocalScale: {x: 0.3, y: 0.3, z: 1}
+  m_LocalScale: {x: 0.4, y: 0.4, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1162690095}

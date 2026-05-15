@@ -7,23 +7,24 @@ namespace SENTRY
     /// <summary>
     /// 배틀 필드에서 BattleEncounterDataSO의 정보를 기반으로 적을 소환하는 스포너.
     ///
-    /// [변경 사항 - 페이크 쿼터뷰 대응]
-    /// - SpawnEnemy()에서 적 생성 직후 Rigidbody2D를 Kinematic으로 전환하고
-    ///   gravityScale을 0으로 설정합니다.
-    /// - 배틀 필드는 페이크 쿼터뷰(Y=깊이) 모드이므로
-    ///   모든 오브젝트가 중력 없이 동작해야 합니다.
-    /// - 적 이동은 Enemy.cs 내부의 MovePosition 기반 AI로 처리합니다.
+    /// [설계 원칙]
+    /// 소환은 SpawnWithDropEffect() 1회가 전부입니다.
+    /// 배틀 진입 시 FieldManager.BattleSequenceRoutine()에서 호출되며
+    /// 이후 추가 소환은 일절 없습니다.
     ///
-    /// [소환 흐름]
-    /// SpawnStart(encounterData, player)
-    ///   → Entry[0]: spawnDelay 대기 → count마리를 spawnInterval 간격으로 소환
-    ///   → Entry[1]: spawnDelay 대기 → count마리를 spawnInterval 간격으로 소환
-    ///   → ... 모든 엔트리 완료 → 스폰 종료
+    /// SpawnStart() / SpawnRoutine() / SpawnEnemy() 는 제거됐습니다.
+    ///
+    /// [소환 규칙]
+    ///   - SpawnPoint를 인덱스 순서대로 1개씩 사용 (중복 방지)
+    ///   - 최대 소환 수 = _spawnPoints.Length (초과 시 중단)
+    ///   - 소환 직후 X Rotation = _enemyRotationX (-50) 적용 (쿼터뷰 카메라 보정)
     ///
     /// [히어라키 위치]
     /// BattleField
     ///   └── EnemySpawner (이 스크립트)
-    ///         └── SpawnPoint_1, SpawnPoint_2 ... (자식 Transform)
+    ///         ├── SpawnPoint_1  ← _spawnPoints[0]
+    ///         ├── SpawnPoint_2  ← _spawnPoints[1]
+    ///         └── SpawnPoint_3  ← _spawnPoints[2]
     /// </summary>
     public class EnemySpawner : MonoBehaviour
     {
@@ -33,22 +34,17 @@ namespace SENTRY
 
         [Header("스폰 포인트")]
         [Tooltip("적이 생성될 위치 목록.\n" +
-                 "자식 오브젝트로 추가한 뒤 여기에 드래그하세요.\n" +
-                 "엔트리별로 랜덤 포인트가 선택됩니다.")]
+                 "인덱스 순서대로 1개씩 사용하며 각 포인트에는 최대 1마리만 배치됩니다.")]
         [SerializeField] private Transform[] _spawnPoints;
+
+        [Header("쿼터뷰 회전 보정")]
+        [Tooltip("소환 직후 적 오브젝트에 적용할 X Rotation.\n" +
+                 "카메라 X Rotation이 -50이면 이 값을 -50으로 설정하세요.")]
+        [SerializeField] private float _enemyRotationX = -50f;
 
         // ─────────────────────────────────────────
         //  내부 상태 변수
         // ─────────────────────────────────────────
-
-        /// <summary>현재 실행 중인 인카운터 데이터</summary>
-        private BattleEncounterDataSO _encounterData;
-
-        /// <summary>플레이어 Transform (생성된 적에게 전달)</summary>
-        private Transform _playerTransform;
-
-        /// <summary>스폰 루프 실행 여부</summary>
-        private bool _isSpawning = false;
 
         /// <summary>현재 생존 중인 적 수</summary>
         private int _aliveEnemyCount = 0;
@@ -57,81 +53,44 @@ namespace SENTRY
         private int _totalSpawnedCount = 0;
 
         // ─────────────────────────────────────────
+        //  내부 캐시
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// SpawnWithDropEffect() 시점에 씬에서 직접 찾아 캐싱합니다.
+        /// BattleField 하위 오브젝트가 비활성이어서 Instance가 null인 경우를 방지합니다.
+        /// </summary>
+        private EnemyComboManager _enemyComboManager;
+        private EnemyBattleUIManager _enemyBattleUIManager;
+
+        // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
-        /// <summary>현재 생존 적 수 (BattleManager 참조용)</summary>
+        /// <summary>현재 생존 적 수</summary>
         public int AliveEnemyCount => _aliveEnemyCount;
 
         /// <summary>현재까지 소환된 총 적 수</summary>
         public int TotalSpawnedCount => _totalSpawnedCount;
 
         // ─────────────────────────────────────────
-        //  내부 캐시 — Instance 의존 제거
+        //  스폰 중단 (배틀 종료 시)
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// SpawnStart() 시점에 씬에서 직접 찾아 캐싱합니다.
-        /// BattleField 하위의 오브젝트가 비활성이어서 Instance가 null인 경우를 방지합니다.
-        /// </summary>
-        private EnemyComboManager _enemyComboManager;
-        private EnemyBattleUIManager _enemyBattleUIManager;
-
-        // ─────────────────────────────────────────
-        //  스폰 제어
-        // ─────────────────────────────────────────
-
-        /// <summary>
-        /// 인카운터 데이터를 기반으로 소환을 시작합니다.
-        /// BattleManager.StartBattle()에서 호출합니다.
-        /// </summary>
-        public void SpawnStart(BattleEncounterDataSO encounterData, Transform player)
-        {
-            if (encounterData == null)
-            {
-                Debug.LogWarning("[EnemySpawner] EncounterData가 없습니다.");
-                return;
-            }
-
-            _encounterData = encounterData;
-            _playerTransform = player;
-            _isSpawning = true;
-            _aliveEnemyCount = 0;
-            _totalSpawnedCount = 0;
-
-            // ── Instance 대신 씬에서 직접 탐색하여 캐싱 ──
-            // BattleField가 SetActive(true)된 직후 호출되므로
-            // 이 시점에 FindFirstObjectByType으로 반드시 찾을 수 있습니다.
-            _enemyComboManager = EnemyComboManager.Instance
-                                    ?? FindFirstObjectByType<EnemyComboManager>();
-            _enemyBattleUIManager = EnemyBattleUIManager.Instance
-                                    ?? FindFirstObjectByType<EnemyBattleUIManager>();
-
-            if (_enemyComboManager == null)
-                Debug.LogWarning("[EnemySpawner] ★ EnemyComboManager를 찾을 수 없습니다.");
-            if (_enemyBattleUIManager == null)
-                Debug.LogWarning("[EnemySpawner] ★ EnemyBattleUIManager를 찾을 수 없습니다.");
-
-            // 콤보 순번 초기화
-            _enemyComboManager?.Initialize(encounterData.comboCount);
-
-            Debug.Log($"[EnemySpawner] 인카운터 시작: {encounterData.encounterName} " +
-                      $"/ 총 적 수: {encounterData.GetTotalEnemyCount()}");
-
-            StartCoroutine(SpawnRoutine());
-        }
-
-        /// <summary>
-        /// 스폰을 강제 중단합니다.
+        /// 진행 중인 코루틴을 중단합니다.
         /// BattleManager.EndBattle()에서 호출합니다.
         /// </summary>
         public void SpawnStop()
         {
-            _isSpawning = false;
             StopAllCoroutines();
             Debug.Log("[EnemySpawner] 스폰 중단");
         }
 
+        /// <summary>
+        /// 적이 사망했을 때 생존 카운터를 감소시킵니다.
+        /// BattleManager.OnEnemyDied()에서 호출합니다.
+        /// </summary>
         public void NotifyEnemyDied()
         {
             _aliveEnemyCount = Mathf.Max(0, _aliveEnemyCount - 1);
@@ -143,30 +102,46 @@ namespace SENTRY
 
         /// <summary>
         /// FieldManager.BattleSequenceRoutine()에서 yield return으로 호출됩니다.
-        /// 적을 하늘 위에서 낙하시키는 연출로 순서대로 소환합니다.
-        /// 모든 적의 착지가 완료된 후 코루틴을 반환합니다.
+        /// 이 메서드가 이번 배틀의 유일한 소환 수단입니다.
+        /// 이후 추가 소환은 없습니다.
+        ///
+        /// [소환 규칙]
+        ///   SpawnPoint를 인덱스 순서대로 1개씩 사용합니다.
+        ///   소환 수가 _spawnPoints.Length를 초과하면 즉시 중단합니다.
+        ///   각 적은 하늘 위(_enemyRotationX 적용된 채로)에서 낙하합니다.
+        ///   모든 적의 착지가 완료된 후 코루틴을 반환합니다.
+        ///
+        /// [X Rotation 보정]
+        ///   소환 직후 _enemyRotationX를 적용해 쿼터뷰 카메라 각도에 맞게 서 있는 것처럼 보입니다.
         /// </summary>
         public IEnumerator SpawnWithDropEffect(BattleEncounterDataSO encounterData)
         {
             if (encounterData == null || _spawnPoints == null || _spawnPoints.Length == 0)
                 yield break;
 
-            // BattleField SetActive 직후이므로 이 시점에 반드시 찾을 수 있습니다.
+            // 매니저 캐싱 (BattleField SetActive(true) 직후이므로 반드시 찾을 수 있음)
             _enemyComboManager = EnemyComboManager.Instance
-                                    ?? FindFirstObjectByType<EnemyComboManager>();
+                                 ?? FindFirstObjectByType<EnemyComboManager>();
             _enemyBattleUIManager = EnemyBattleUIManager.Instance
                                     ?? FindFirstObjectByType<EnemyBattleUIManager>();
+
+            if (_enemyComboManager == null)
+                Debug.LogWarning("[EnemySpawner] ★ EnemyComboManager를 찾을 수 없습니다.");
+            if (_enemyBattleUIManager == null)
+                Debug.LogWarning("[EnemySpawner] ★ EnemyBattleUIManager를 찾을 수 없습니다.");
 
             _enemyComboManager?.Initialize(encounterData.comboCount);
 
             _aliveEnemyCount = 0;
             _totalSpawnedCount = 0;
 
-            const float dropHeight = 8f;    // 하늘 위 낙하 시작 높이 오프셋
-            const float dropDuration = 0.5f;  // 낙하 소요 시간
-            const float stagger = 0.25f; // 적 간 낙하 시작 간격
+            const float dropHeight = 20f;
+            const float dropDuration = 0.5f;
+            const float stagger = 0.25f;
 
             float lastDropEnd = 0f;
+            int spawnPointIdx = 0;
+            int maxSpawn = _spawnPoints.Length;
 
             foreach (var entry in encounterData.spawnEntries)
             {
@@ -174,14 +149,27 @@ namespace SENTRY
 
                 for (int i = 0; i < entry.count; i++)
                 {
-                    Transform spawnPoint = _spawnPoints[Random.Range(0, _spawnPoints.Length)];
+                    // 최대 소환 수 = SpawnPoint 수 초과 시 중단
+                    if (spawnPointIdx >= maxSpawn)
+                    {
+                        Debug.LogWarning($"[EnemySpawner] SpawnPoint({maxSpawn}개) 초과 — 소환 중단");
+                        goto SpawnDone;
+                    }
+
+                    Transform spawnPoint = _spawnPoints[spawnPointIdx++];
                     Vector3 landPos = spawnPoint.position;
                     Vector3 dropStart = landPos + Vector3.up * dropHeight;
 
+                    // 적 생성 — 하늘 위에 배치
                     GameObject newEnemy = Instantiate(
                         entry.enemyPrefab, dropStart, Quaternion.identity);
 
-                    // 페이크 쿼터뷰 물리 전환
+                    // X Rotation 보정 — 쿼터뷰 카메라 각도에 맞게 서 있는 것처럼 보이게 함
+                    Vector3 euler = newEnemy.transform.eulerAngles;
+                    newEnemy.transform.eulerAngles = new Vector3(
+                        _enemyRotationX, euler.y, euler.z);
+
+                    // 페이크 쿼터뷰 물리 전환 (중력 OFF + Kinematic)
                     Rigidbody2D rb = newEnemy.GetComponent<Rigidbody2D>();
                     if (rb != null)
                     {
@@ -190,8 +178,9 @@ namespace SENTRY
                         rb.linearVelocity = Vector2.zero;
                     }
 
-                    // 낙하 DOMove — 적마다 stagger 간격으로 순서대로 낙하
+                    // 낙하 연출 (stagger 간격으로 순서대로 낙하)
                     float delay = _totalSpawnedCount * stagger;
+
                     newEnemy.transform
                         .DOMove(landPos, dropDuration)
                         .SetEase(Ease.InQuad)
@@ -202,14 +191,15 @@ namespace SENTRY
 
                     lastDropEnd = delay + dropDuration + 0.25f;
 
-                    // Init + ComboManager/UIManager 등록
+                    // Enemy 초기화 + 매니저 등록
                     Enemy enemyScript = newEnemy.GetComponent<Enemy>();
                     if (enemyScript != null)
                     {
                         enemyScript.Init();
-                        _enemyComboManager?.RegisterEnemy(enemyScript);
-                        // EnemyComboManager 없을 경우 직접 등록
-                        if (_enemyComboManager == null)
+
+                        if (_enemyComboManager != null)
+                            _enemyComboManager.RegisterEnemy(enemyScript);
+                        else
                             _enemyBattleUIManager?.RegisterEnemy(enemyScript);
                     }
 
@@ -218,132 +208,11 @@ namespace SENTRY
                 }
             }
 
+        SpawnDone:
             // 마지막 적 착지 + 충격 연출 완료까지 대기
             yield return new WaitForSeconds(lastDropEnd);
 
-            Debug.Log($"[EnemySpawner] 낙하 소환 완료 ({_totalSpawnedCount}마리)");
+            Debug.Log($"[EnemySpawner] 낙하 소환 완료 — {_totalSpawnedCount}마리");
         }
-
-        // ─────────────────────────────────────────
-        //  소환 루프
-        // ─────────────────────────────────────────
-
-        /// <summary>
-        /// BattleEncounterDataSO의 spawnEntries를 순서대로 처리합니다.
-        /// 각 엔트리의 spawnDelay / spawnInterval에 따라 타이밍을 제어합니다.
-        /// </summary>
-        private IEnumerator SpawnRoutine()
-        {
-            if (_encounterData == null) yield break;
-
-            foreach (EnemySpawnEntry entry in _encounterData.spawnEntries)
-            {
-                if (!_isSpawning) yield break;
-                if (GameManager.Instance != null && GameManager.Instance.IsGameOver)
-                    yield break;
-
-                if (entry.enemyPrefab == null)
-                {
-                    Debug.LogWarning($"[EnemySpawner] {_encounterData.encounterName} — " +
-                                     "enemyPrefab이 null인 엔트리가 있습니다. 건너뜁니다.");
-                    continue;
-                }
-
-                if (entry.spawnDelay > 0f)
-                    yield return new WaitForSeconds(entry.spawnDelay);
-
-                for (int i = 0; i < entry.count; i++)
-                {
-                    if (!_isSpawning) yield break;
-
-                    SpawnEnemy(entry.enemyPrefab);
-
-                    if (i < entry.count - 1 && entry.spawnInterval > 0f)
-                        yield return new WaitForSeconds(entry.spawnInterval);
-                }
-            }
-
-            Debug.Log($"[EnemySpawner] 모든 적 소환 완료 " +
-                      $"(총 {_totalSpawnedCount}마리)");
-        }
-
-        // ─────────────────────────────────────────
-        //  개별 적 생성
-        // ─────────────────────────────────────────
-
-        /// <summary>
-        /// 랜덤 스폰 포인트에 적을 생성하고 Init 및 물리 전환을 수행합니다.
-        ///
-        /// [페이크 쿼터뷰 대응]
-        ///   Instantiate 직후 Rigidbody2D를 Kinematic으로 전환하고
-        ///   gravityScale을 0으로 설정합니다.
-        ///   배틀 필드의 모든 오브젝트는 중력 없이 동작해야 하며,
-        ///   적 이동은 Enemy.cs 내부 AI가 MovePosition으로 처리합니다.
-        /// </summary>
-        /// <param name="prefab">생성할 적 프리팹</param>
-        private void SpawnEnemy(GameObject prefab)
-        {
-            if (_spawnPoints == null || _spawnPoints.Length == 0)
-            {
-                Debug.LogWarning("[EnemySpawner] SpawnPoint가 없습니다.");
-                return;
-            }
-
-            Transform spawnPoint =
-                _spawnPoints[Random.Range(0, _spawnPoints.Length)];
-
-            GameObject newEnemy = Instantiate(
-                prefab,
-                spawnPoint.position,
-                Quaternion.identity);
-
-            // ── 페이크 쿼터뷰 물리 전환 ──
-            // 배틀 필드는 중력이 없는 페이크 쿼터뷰 모드입니다.
-            // Kinematic 전환 후 Enemy.Init()을 호출하여
-            // 적 AI가 MovePosition 기반으로 이동하도록 합니다.
-            Rigidbody2D rb = newEnemy.GetComponent<Rigidbody2D>();
-            if (rb != null)
-            {
-                rb.gravityScale = 0f;
-                rb.bodyType = RigidbodyType2D.Kinematic;
-                rb.linearVelocity = Vector2.zero;
-            }
-
-            Enemy enemyScript = newEnemy.GetComponent<Enemy>();
-            if (enemyScript != null)
-                enemyScript.Init(_playerTransform);
-
-            // ── EnemyComboManager / EnemyBattleUIManager 직접 참조로 등록 ──
-            // Instance가 null일 경우를 대비해 SpawnStart()에서 캐싱한 참조를 사용합니다.
-            if (enemyScript != null)
-            {
-                _enemyComboManager?.RegisterEnemy(enemyScript);
-
-                // EnemyComboManager를 통하지 않고 직접 등록합니다.
-                // EnemyComboManager.RegisterEnemy()에서 내부적으로 호출하지만
-                // 캐싱 참조가 null일 때를 대비한 이중 안전 처리입니다.
-                if (_enemyComboManager == null)
-                    _enemyBattleUIManager?.RegisterEnemy(enemyScript);
-            }
-
-            _aliveEnemyCount++;
-            _totalSpawnedCount++;
-
-            Debug.Log($"[EnemySpawner] {prefab.name} 소환 완료 " +
-                      $"(생존: {_aliveEnemyCount} / 총 소환: {_totalSpawnedCount})");
-        }
-
-#if UNITY_EDITOR
-        private void OnDrawGizmos()
-        {
-            if (_spawnPoints == null) return;
-            Gizmos.color = Color.red;
-            foreach (var point in _spawnPoints)
-            {
-                if (point != null)
-                    Gizmos.DrawSphere(point.position, 0.3f);
-            }
-        }
-#endif
     }
 }

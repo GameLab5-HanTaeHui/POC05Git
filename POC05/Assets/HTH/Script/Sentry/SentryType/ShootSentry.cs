@@ -11,6 +11,13 @@ namespace SENTRY
     ///   공격력 / 교전 거리 / 쿨타임 / 재배치 속도 / 스킬 게이지
     ///   기본 정보(이름, HP, 레벨, EXP, 추종 설정)는 SentryBase에 있습니다.
     ///
+    /// [변경 사항 — 후퇴 중 공격 허용]
+    ///   기존: _preferredDistance 범위 내에 있을 때만 TryAttack() 호출
+    ///         너무 가까우면 후퇴만 하고 공격 불가 → 혼자 남으면 계속 도망만 감
+    ///   수정: 거리 조절(이동)과 공격을 독립적으로 처리
+    ///         후퇴 중이거나 접근 중이어도 쿨타임이 됐으면 TryAttack() 호출
+    ///         단, 최소 공격 가능 거리(_maxAttackRange) 이내일 때만 발사
+    ///
     /// [레이어 기반 탐색]
     ///   FindTarget()에서 EnemyLive 레이어만 탐색합니다.
     /// </summary>
@@ -21,10 +28,23 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         [Header("사격 전투 설정")]
+        [Tooltip("기본 공격 데미지")]
         [SerializeField] private int _attackDamage = 20;
+
+        [Tooltip("적 탐지 최대 반경")]
         [SerializeField] private float _detectionRange = 10f;
+
+        [Tooltip("유지하려는 교전 거리 (이 거리를 중심으로 0.7~1.3배 범위 내에서 자유롭게 이동)")]
         [SerializeField] private float _preferredDistance = 5f;
+
+        [Tooltip("이 거리 이내면 후퇴 중에도 공격합니다.\n" +
+                 "보통 _detectionRange와 같거나 약간 작게 설정합니다.")]
+        [SerializeField] private float _maxAttackRange = 9f;
+
+        [Tooltip("공격 쿨타임 (초)")]
         [SerializeField] private float _attackCooldown = 1.5f;
+
+        [Tooltip("거리 조절 이동 속도")]
         [SerializeField] private float _repositionSpeed = 2f;
 
         [Header("레이어 설정")]
@@ -50,16 +70,26 @@ namespace SENTRY
         //  내부 상태
         // ─────────────────────────────────────────
 
+        /// <summary>현재 추격 중인 적</summary>
         private Transform _currentTarget;
+
+        /// <summary>마지막 공격 시각</summary>
         private float _lastAttackTime;
+
+        /// <summary>현재 스킬 게이지</summary>
         private float _currentSkillGauge = 0f;
+
+        /// <summary>배틀 AI 활성 여부</summary>
         private bool _isInBattle = false;
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
+        /// <summary>현재 스킬 게이지 (PlayerBattleUIManager 표시용)</summary>
         public float SkillGauge => _currentSkillGauge;
+
+        /// <summary>최대 스킬 게이지 (PlayerBattleUIManager 표시용)</summary>
         public float MaxSkillGauge => _maxSkillGauge;
 
         // ─────────────────────────────────────────
@@ -78,12 +108,20 @@ namespace SENTRY
         //  배틀 진입 / 종료
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 배틀 시작 시 BattleManager.BattleStartRoutine()에서 호출합니다.
+        /// AI를 활성화하고 플레이어 추종을 멈춥니다.
+        /// </summary>
         public void EnterBattle()
         {
             _isInBattle = true;
             StopFollowing();
         }
 
+        /// <summary>
+        /// 배틀 종료 시 BattleManager.EndBattle()에서 호출합니다.
+        /// AI를 비활성화하고 플레이어 추종을 재개합니다.
+        /// </summary>
         public void ExitBattle()
         {
             _isInBattle = false;
@@ -138,7 +176,20 @@ namespace SENTRY
             _currentTarget = best;
         }
 
-        /// <summary>교전 거리 유지하며 사격 시도.</summary>
+        /// <summary>
+        /// 교전 거리 조절과 공격을 독립적으로 처리합니다.
+        ///
+        /// [변경 내용]
+        /// 기존 구조: 거리 범위에 따라 후퇴 / 접근 / 공격 중 하나만 실행
+        ///   → 후퇴 중에는 공격 불가 → 혼자 남으면 계속 도망만 감
+        ///
+        /// 변경 구조: 이동과 공격을 분리하여 독립 실행
+        ///   Step 1. 거리 조절 — 너무 가까우면 후퇴, 너무 멀면 접근
+        ///   Step 2. 공격 — _maxAttackRange 이내이고 쿨타임이 됐으면 항상 TryAttack()
+        ///
+        ///   후퇴 중이어도 적이 _maxAttackRange 이내에 있으면 발사합니다.
+        ///   이로써 혼자 남아 계속 후퇴하는 상황에서도 공격이 가능합니다.
+        /// </summary>
         private void HandleBattleAI()
         {
             if (_currentTarget == null ||
@@ -151,24 +202,33 @@ namespace SENTRY
 
             float dist = Vector2.Distance(transform.position, _currentTarget.position);
             Vector2 dir = ((Vector2)_currentTarget.position
-                           - (Vector2)transform.position).normalized;
+                             - (Vector2)transform.position).normalized;
             float speed = _repositionSpeed * OverloadSpeedMultiplier;
 
+            // ── Step 1. 거리 조절 ──
+            // 너무 가까우면 후퇴, 너무 멀면 접근, 범위 내면 정지
             if (dist < _preferredDistance * 0.7f)
-                BattleMove(-dir, speed);
+                BattleMove(-dir, speed);   // 후퇴
             else if (dist > _preferredDistance * 1.3f)
-                BattleMove(dir, speed);
+                BattleMove(dir, speed);    // 접근
             else
-            {
-                BattleStop();
+                BattleStop();              // 적정 거리 — 정지
+
+            // ── Step 2. 공격 ──
+            // 거리 조절 상태(후퇴/접근/정지)와 무관하게
+            // _maxAttackRange 이내이고 쿨타임이 됐으면 발사합니다.
+            if (dist <= _maxAttackRange)
                 TryAttack();
-            }
         }
 
         // ─────────────────────────────────────────
         //  기본 공격
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 쿨타임 및 타겟 유효성 확인 후 발사합니다.
+        /// HandleBattleAI()에서 거리·이동 상태와 무관하게 호출됩니다.
+        /// </summary>
         private void TryAttack()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
@@ -179,10 +239,10 @@ namespace SENTRY
 
             _lastAttackTime = Time.time;
 
-            // 탄환 발사 (데미지 적용 후 타겟 KO 가능 — FireBullet 내부 null 안전)
             FireBullet(_currentTarget,
                 Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier));
 
+            // 반동 연출 (타겟이 여전히 유효할 때만)
             if (_currentTarget != null)
             {
                 Vector3 shootDir =
@@ -193,6 +253,12 @@ namespace SENTRY
             ChargeSkillGauge(_skillGaugePerAttack);
         }
 
+        /// <summary>
+        /// 탄환 프리팹을 발사합니다.
+        /// SentryComboManager의 콤보 연출에서도 직접 호출합니다.
+        /// </summary>
+        /// <param name="target">발사 목표 Transform</param>
+        /// <param name="damage">적용할 데미지</param>
         public void FireBullet(Transform target, int damage)
         {
             if (_bulletPrefab == null || target == null) return;
@@ -209,9 +275,15 @@ namespace SENTRY
         //  스킬 게이지
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 공격 1회마다 스킬 게이지를 충전합니다.
+        /// 최대치 도달 시 UseSkill()을 자동 호출합니다.
+        /// </summary>
         private void ChargeSkillGauge(float amount)
         {
-            _currentSkillGauge = Mathf.Min(_currentSkillGauge + amount, _maxSkillGauge);
+            _currentSkillGauge = Mathf.Min(
+                _currentSkillGauge + amount, _maxSkillGauge);
+
             if (_currentSkillGauge >= _maxSkillGauge &&
                 (_skillEffect == null || !_skillEffect.IsPlaying))
             {
@@ -224,6 +296,10 @@ namespace SENTRY
         //  고유 스킬 (3연발)
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 스킬 게이지 만참 시 3연발 스킬을 발동합니다.
+        /// SkillEffect_Shoot 컴포넌트가 없으면 즉시 3발을 발사합니다.
+        /// </summary>
         private void UseSkill()
         {
             if (_currentTarget == null) return;
@@ -243,12 +319,12 @@ namespace SENTRY
 
             _skillEffect.PlaySkill(
                 captured,
-                onEachShot: () => FireBullet(captured, skillDmg)
-            );
+                onEachShot: () => FireBullet(captured, skillDmg));
 
             StartCoroutine(WaitSkillComplete());
         }
 
+        /// <summary>스킬 연출 완료 후 SentryComboManager에 통보합니다.</summary>
         private IEnumerator WaitSkillComplete()
         {
             yield return null;
@@ -261,21 +337,35 @@ namespace SENTRY
         //  레벨업
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 레벨업 시 공격력, 탐지 범위, 교전 거리를 증가시킵니다.
+        /// 최대 공격 범위(_maxAttackRange)도 탐지 범위에 맞게 갱신합니다.
+        /// </summary>
         protected override void LevelUp()
         {
             base.LevelUp();
             _attackDamage = Mathf.RoundToInt(_attackDamage * 1.1f);
             _detectionRange += 0.2f;
             _preferredDistance += 0.1f;
+
+            // 탐지 범위가 늘면 최대 공격 범위도 동기화
+            _maxAttackRange = _detectionRange * 0.9f;
         }
 
 #if UNITY_EDITOR
         private void OnDrawGizmos()
         {
+            // 탐지 범위 (하늘색)
             Gizmos.color = Color.cyan;
             Gizmos.DrawWireSphere(transform.position, _detectionRange);
+
+            // 교전 유지 범위 (파랑)
             Gizmos.color = Color.blue;
             Gizmos.DrawWireSphere(transform.position, _preferredDistance);
+
+            // 최대 공격 가능 범위 (노랑)
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(transform.position, _maxAttackRange);
         }
 #endif
     }
