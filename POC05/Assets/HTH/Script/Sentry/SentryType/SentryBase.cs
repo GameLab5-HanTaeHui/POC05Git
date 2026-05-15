@@ -148,6 +148,8 @@ namespace SENTRY
         {
             if (!IsKnockedOut && _playerTransform != null && _isFollowing)
                 FollowPlayer();
+            if (_isInBattleField)
+                BattlePhysicsHelper.ClampZ(transform);
         }
 
         // ─────────────────────────────────────────
@@ -265,7 +267,8 @@ namespace SENTRY
         public void BattleMove(Vector2 direction, float speed)
         {
             if (_rb == null || !_isBattlePhysics) return;
-            _rb.MovePosition(_rb.position + direction * speed * Time.fixedDeltaTime);
+            Vector2 newPos = _rb.position + direction * speed * Time.fixedDeltaTime;
+            _rb.MovePosition(newPos);
         }
 
         /// <summary>배틀 필드 이동 정지.</summary>
@@ -286,7 +289,7 @@ namespace SENTRY
 
             _currentHp = Mathf.Max(_currentHp - damage, 0);
 
-            transform.DOShakePosition(0.2f, 0.15f, 10, 90f);
+            transform.DOShakePosition(0.2f, BattlePhysicsHelper.ShakeStrength(0.15f), 10, 90f);
             if (_spriteRenderer != null)
                 _spriteRenderer.DOColor(Color.red, 0.05f)
                     .SetLoops(4, LoopType.Yoyo)

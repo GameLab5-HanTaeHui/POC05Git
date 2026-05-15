@@ -221,14 +221,16 @@ namespace SENTRY
                     radius: _enemyRadius,
                     wallLayer: _wallLayer);
 
-                _currentTarget.DOMove(safeTarget, _pushDuration).SetEase(Ease.OutQuart);
+                Transform t = _currentTarget;
+                _currentTarget.DOMove(safeTarget, _pushDuration)
+                    .SetEase(Ease.OutQuart)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(t));
             }
 
             if (_currentTarget != null)
             {
-                // [Y축 고정] 연출용 punch 방향도 FlatDirection 사용
-                Vector3 punchDir =
-                    BattlePhysicsHelper.FlatDirection(transform.position, _currentTarget.position) * 0.4f;
+                Vector3 punchDir = BattlePhysicsHelper
+                    .PunchDir(BattlePhysicsHelper.FlatDirection(transform.position, _currentTarget.position) * 0.4f);
                 transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
             }
 

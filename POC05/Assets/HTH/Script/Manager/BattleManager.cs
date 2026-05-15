@@ -51,6 +51,10 @@ namespace SENTRY
         [Tooltip("벽 센트리")]
         [SerializeField] private WallSentry _wallSentry;
 
+        [Header("플레이어 능력")]
+        [Tooltip("PlayerAbility 컴포넌트. 전투 시작/종료 타이밍 전달에 사용합니다.")]
+        [SerializeField] private PlayerAbility _playerAbility;
+
         [Header("스포너 참조")]
         [Tooltip("배틀 필드의 EnemySpawner 컴포넌트.\n" +
                  "EndBattle 시 SpawnStop() 호출용으로만 사용합니다.")]
@@ -137,6 +141,8 @@ namespace SENTRY
         /// </summary>
         private IEnumerator BattleStartRoutine()
         {
+            _playerAbility?.OnBattleStart();
+
             // ① 센트리 AI 활성화
             // SetupForBattle()은 FieldManager에서 이미 완료됐으므로 호출하지 않습니다.
             // EnterBattle()만 호출해 전투 AI를 켭니다.
@@ -242,6 +248,7 @@ namespace SENTRY
             _isInBattle = false;
 
             _enemySpawner?.SpawnStop();
+            _playerAbility?.OnBattleEnd();
             SentryComboManager.Instance?.OnBattleEnd();
 
             if (_strikeSentry != null) { _strikeSentry.ExitBattle(); _strikeSentry.ExitBattlePhysics(); }

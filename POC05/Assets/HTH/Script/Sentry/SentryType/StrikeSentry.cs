@@ -198,8 +198,8 @@ namespace SENTRY
             // 연출 — _currentTarget이 파괴됐을 수 있으므로 null 체크 후 실행
             if (_currentTarget != null)
             {
-                Vector3 punchDir =
-                    (_currentTarget.position - transform.position).normalized * 0.3f;
+                Vector3 punchDir = BattlePhysicsHelper
+                    .PunchDir(BattlePhysicsHelper.FlatDirection(transform.position, _currentTarget.position) * 0.3f);
                 transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
             }
 

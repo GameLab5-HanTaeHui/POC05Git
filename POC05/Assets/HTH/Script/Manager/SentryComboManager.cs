@@ -8,28 +8,27 @@ namespace SENTRY
 {
     /// <summary>
     /// 센트리 콤보 시스템을 관리하는 싱글턴 매니저.
-    /// (구 ComboManager → SentryComboManager 이름 변경)
     ///
-    /// [버그 수정 — TilemapCollider 뚫림]
-    /// 콤보 연출 내 모든 DOMove 호출(센트리 이동, 적 이동, 복귀)에
-    /// BattlePhysicsHelper.GetSafeTarget()을 적용했습니다.
+    /// [Z값 오염 수정 목록]
     ///
-    ///   적용 대상:
-    ///     CalcSafeComboPositions() — 콤보 집결 위치 보정
-    ///     ReturnFromCombo()       — 복귀 DOMove 보정
-    ///     Combo_StrikeShoot()     — Strike 접근 DOMove 보정
-    ///     Combo_StrikeWall()      — Strike 접근, Wall 돌진 DOMove 보정
-    ///     Combo_ShootWall()       — Wall 낙하 DOMove 보정
-    ///     Combo_AllThree()        — Strike/Wall 접근 + 최종 밀치기 DOMove 보정
+    ///   1. CalcSafeComboPositions()
+    ///      기존: rawShoot/rawWall의 Z에 offset.y가 들어가 Z 오염
+    ///      수정: Z는 항상 0으로 고정. 오프셋은 X에만 적용
     ///
-    ///   3콤보 4단계 AddForce → DOMove + GetSafeTarget으로 교체:
-    ///     AddForce는 Kinematic 상태에서 무시되며, Dynamic으로 전환해도
-    ///     배틀 필드 구조에서 벽 뚫림이 발생했습니다.
+    ///   2. DOShakePosition — float 오버로드 → Z 흔들림 발생
+    ///      수정: BattlePhysicsHelper.ShakeStrength(float) → Vector3(x, y, 0) 사용
     ///
-    /// [Inspector 추가 필드]
-    ///   _wallLayer     — TilemapCollider 레이어 (보통 Ground 또는 Wall)
-    ///   _sentryRadius  — 센트리 콜라이더 반경 (기본 0.4f)
-    ///   _enemyRadius   — 적 콜라이더 반경 (기본 0.4f)
+    ///   3. DOPunchPosition — Z 포함 방향 벡터 사용
+    ///      수정: BattlePhysicsHelper.PunchDir(dir) → Vector3(x, 0, 0) 사용
+    ///
+    ///   4. DOMove — OnUpdate ClampZ 미적용
+    ///      수정: 모든 이동성 DOMove에 .OnUpdate(() => ClampZ(t)) 추가
+    ///
+    ///   5. ReturnFromCombo — DOMove OnUpdate ClampZ 미적용
+    ///      수정: .OnUpdate(() => ClampZ(sentry.transform)) 추가
+    ///
+    ///   6. Combo_ShootWall Wall 낙하 skyPos — Vector3.up * 5f → Z 오염
+    ///      수정: skyPos Z = 0 강제 고정
     /// </summary>
     public class SentryComboManager : MonoBehaviour
     {
@@ -45,12 +44,11 @@ namespace SENTRY
         [SerializeField] private WallSentry _wallSentry;
 
         // ─────────────────────────────────────────
-        //  Inspector — 물리 보정 (벽 뚫림 방지)
+        //  Inspector — 물리 보정
         // ─────────────────────────────────────────
 
-        [Header("물리 보정 — 벽 뚫림 방지")]
-        [Tooltip("TilemapCollider가 있는 레이어 (보통 Ground 또는 Wall).\n" +
-                 "콤보 DOMove 전 CircleCast 충돌 검사에 사용됩니다.")]
+        [Header("물리 보정 — 벽 뚫림 / Z 오염 방지")]
+        [Tooltip("TilemapCollider가 있는 레이어 (보통 Ground 또는 Wall)")]
         [SerializeField] private LayerMask _wallLayer;
 
         [Tooltip("센트리 콜라이더 반경 (CircleCast 크기). 기본 0.4f")]
@@ -82,7 +80,8 @@ namespace SENTRY
         //  Inspector — 콤보 포지션 오프셋
         // ─────────────────────────────────────────
 
-        [Header("콤보 포지션 오프셋 (적 위치 기준 상대 좌표)")]
+        [Header("콤보 포지션 오프셋 (적 위치 기준 X축 오프셋만 사용)")]
+        [Tooltip("X = 좌우 오프셋만 사용합니다. Y(Z 오염 원인)는 무시됩니다.")]
         [SerializeField] private Vector2 _strikeComboOffset = new Vector2(-1.5f, 0f);
         [SerializeField] private Vector2 _shootComboOffset = new Vector2(-4f, 0f);
         [SerializeField] private Vector2 _wallComboOffset = new Vector2(1f, 0f);
@@ -95,11 +94,7 @@ namespace SENTRY
         [SerializeField] private int _combo3BulletCount = 10;
         [SerializeField] private float _combo3BulletInterval = 0.1f;
         [SerializeField] private float _combo3DamageMultiplier = 4f;
-
-        [Tooltip("3콤보 4단계 최종 밀치기 거리")]
         [SerializeField] private float _combo3FinalPushDist = 5f;
-
-        [Tooltip("3콤보 4단계 최종 밀치기 소요 시간 (초)")]
         [SerializeField] private float _combo3FinalPushDuration = 0.3f;
 
         // ─────────────────────────────────────────
@@ -150,11 +145,6 @@ namespace SENTRY
 
         private void Update()
         {
-            TickCooldowns();
-        }
-
-        private void TickCooldowns()
-        {
             float dt = Time.deltaTime;
             if (_combo3CooldownTimer > 0f) _combo3CooldownTimer -= dt;
             if (_comboACooldownTimer > 0f) _comboACooldownTimer -= dt;
@@ -181,7 +171,8 @@ namespace SENTRY
 
         public void OnEnemyKilled()
         {
-            _currentComboGauge = Mathf.Min(_currentComboGauge + _comboGaugePerKill, _maxComboGauge);
+            _currentComboGauge = Mathf.Min(
+                _currentComboGauge + _comboGaugePerKill, _maxComboGauge);
             if (_currentComboGauge >= _maxComboGauge)
             {
                 _currentComboGauge = 0f;
@@ -191,7 +182,8 @@ namespace SENTRY
 
         public void OnSentrySkillUsed()
         {
-            _currentComboGauge = Mathf.Min(_currentComboGauge + _comboGaugePerSkill, _maxComboGauge);
+            _currentComboGauge = Mathf.Min(
+                _currentComboGauge + _comboGaugePerSkill, _maxComboGauge);
             if (_currentComboGauge >= _maxComboGauge)
             {
                 _currentComboGauge = 0f;
@@ -217,9 +209,12 @@ namespace SENTRY
             }
 
             var candidates = new List<ComboType>();
-            if (strikeAlive && shootAlive && _comboACooldownTimer <= 0f) candidates.Add(ComboType.StrikeShoot);
-            if (strikeAlive && wallAlive && _comboBCooldownTimer <= 0f) candidates.Add(ComboType.StrikeWall);
-            if (shootAlive && wallAlive && _comboCCooldownTimer <= 0f) candidates.Add(ComboType.ShootWall);
+            if (strikeAlive && shootAlive && _comboACooldownTimer <= 0f)
+                candidates.Add(ComboType.StrikeShoot);
+            if (strikeAlive && wallAlive && _comboBCooldownTimer <= 0f)
+                candidates.Add(ComboType.StrikeWall);
+            if (shootAlive && wallAlive && _comboCCooldownTimer <= 0f)
+                candidates.Add(ComboType.ShootWall);
 
             if (candidates.Count > 0)
             {
@@ -268,25 +263,26 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  콤보 집결 위치 계산 (벽 충돌 보정 포함)
+        //  콤보 집결 위치 계산
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 적 위치 기준 각 센트리 콤보 집결 위치를 계산하고
-        /// BattlePhysicsHelper로 벽 충돌 여부를 검사해 안전한 위치로 보정합니다.
+        /// 각 센트리의 콤보 집결 위치를 계산합니다.
+        ///
+        /// [Z 오염 수정]
+        /// 기존: Z에 offset.y 값이 들어가 Z 오염 발생
+        ///   rawShoot = new Vector3(x + offset.x, y, z + offset.y)  ← z에 offset.y 오염
+        /// 수정: X에만 오프셋을 적용, Z는 항상 0으로 강제 고정
+        ///   rawShoot = new Vector3(x + offset.x, y, 0f)            ← Z=0 고정
         /// </summary>
         private (Vector3 strike, Vector3 shoot, Vector3 wall) CalcSafeComboPositions(Enemy target)
         {
             Vector3 basePos = target.transform.position;
 
-            // [Y축 고정] 콤보 집결 위치는 적 위치 기준 오프셋이므로
-            // 오프셋 자체에 Y 성분을 제거하고 적의 Y를 그대로 유지합니다.
-            Vector3 rawStrike = new Vector3(
-                basePos.x + _strikeComboOffset.x, basePos.y, basePos.z + _strikeComboOffset.y);
-            Vector3 rawShoot = new Vector3(
-                basePos.x + _shootComboOffset.x, basePos.y, basePos.z + _shootComboOffset.y);
-            Vector3 rawWall = new Vector3(
-                basePos.x + _wallComboOffset.x, basePos.y, basePos.z + _wallComboOffset.y);
+            // [Z 수정] Z는 항상 0 고정. 오프셋은 X에만 적용
+            Vector3 rawStrike = new Vector3(basePos.x + _strikeComboOffset.x, basePos.y, 0f);
+            Vector3 rawShoot = new Vector3(basePos.x + _shootComboOffset.x, basePos.y, 0f);
+            Vector3 rawWall = new Vector3(basePos.x + _wallComboOffset.x, basePos.y, 0f);
 
             Vector3 safeStrike = _strikeSentry != null
                 ? BattlePhysicsHelper.GetSafeTarget(
@@ -307,24 +303,33 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  복귀 DOMove (벽 충돌 보정 포함)
+        //  복귀 DOMove (Z 고정 + 벽 충돌 보정)
         // ─────────────────────────────────────────
 
         /// <summary>
         /// 콤보 종료 후 센트리를 원래 위치로 복귀시킵니다.
-        /// 복귀 경로에도 BattlePhysicsHelper를 적용해 벽 뚫림을 방지합니다.
+        ///
+        /// [Z 수정] OnUpdate에서 ClampZ를 호출해 복귀 이동 중 Z 오염을 차단합니다.
         /// </summary>
-        private IEnumerator ReturnFromCombo(SentryBase sentry, Vector3 prePos, float duration = 0.5f)
+        private IEnumerator ReturnFromCombo(
+            SentryBase sentry, Vector3 prePos, float duration = 0.5f)
         {
             if (sentry == null) yield break;
+
+            // prePos의 Z도 0으로 강제 고정
+            prePos.z = 0f;
 
             Vector3 safeReturn = BattlePhysicsHelper.GetSafeTarget(
                 sentry.transform.position, prePos, _sentryRadius, _wallLayer);
 
-            yield return sentry.transform
-                .DOMove(safeReturn, duration)
+            Transform t = sentry.transform;
+            yield return t.DOMove(safeReturn, duration)
                 .SetEase(Ease.OutElastic)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(t))  // [Z 수정] 이동 중 Z 실시간 고정
                 .WaitForCompletion();
+
+            // 복귀 완료 후 Z 최종 보정
+            BattlePhysicsHelper.ClampZ(t);
         }
 
         // ─────────────────────────────────────────
@@ -345,24 +350,40 @@ namespace SENTRY
 
             var (strikeComboPos, shootComboPos, _) = CalcSafeComboPositions(target);
 
-            // 집결 이동 — 이미 CalcSafeComboPositions에서 보정됨
-            _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
-            yield return _shootSentry.transform
-                .DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
+            // ── 집결 이동 ──
+            Transform st = _strikeSentry.transform;
+            Transform sh = _shootSentry.transform;
+
+            st.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st));
+
+            yield return sh.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(sh))
+                .WaitForCompletion();
+
+            BattlePhysicsHelper.ClampZ(st);
+            BattlePhysicsHelper.ClampZ(sh);
 
             yield return new WaitForSeconds(0.2f);
 
-            // Strike → Shoot 총구 방향 접근 (Y축 고정 + 벽 보정)
-            Vector3 rawImpact = _shootSentry.transform.position + Vector3.right * 0.4f;
-            rawImpact.y = _strikeSentry.transform.position.y; // Y 고정
+            // ── Strike → Shoot 총구 방향 접근 ──
+            // [Z 수정] rawImpact.z = 0 강제 고정
+            Vector3 rawImpact = new Vector3(
+                _shootSentry.transform.position.x + 0.4f,
+                _strikeSentry.transform.position.y,
+                0f);
             Vector3 safeImpact = BattlePhysicsHelper.GetSafeTarget(
-                _strikeSentry.transform.position, rawImpact, _sentryRadius, _wallLayer);
+                st.position, rawImpact, _sentryRadius, _wallLayer);
 
-            yield return _strikeSentry.transform
-                .DOMove(safeImpact, 0.1f).SetEase(Ease.InExpo).WaitForCompletion();
+            yield return st.DOMove(safeImpact, 0.1f).SetEase(Ease.InExpo)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st))
+                .WaitForCompletion();
 
-            _strikeSentry.transform.DOShakePosition(0.15f, 0.25f, 15, 90f);
-            _shootSentry.transform.DOShakePosition(0.2f, 0.2f, 12, 90f);
+            BattlePhysicsHelper.ClampZ(st);
+
+            // [Z 수정] ShakeStrength — Z 축 흔들림 차단
+            st.DOShakePosition(0.15f, BattlePhysicsHelper.ShakeStrength(0.25f), 15, 90f);
+            sh.DOShakePosition(0.2f, BattlePhysicsHelper.ShakeStrength(0.2f), 12, 90f);
 
             yield return new WaitForSeconds(0.1f);
 
@@ -370,12 +391,14 @@ namespace SENTRY
             {
                 int comboDamage = Mathf.RoundToInt(20 * _combo2DamageMultiplier);
                 GameObject bulletObj = Instantiate(
-                    _piercingBulletPrefab, _shootSentry.transform.position, Quaternion.identity);
+                    _piercingBulletPrefab, sh.position, Quaternion.identity);
                 SentryPiercingBullet pb = bulletObj.GetComponent<SentryPiercingBullet>();
                 if (pb != null) { pb.damage = comboDamage; pb.Setup(target.transform); }
             }
 
-            _shootSentry.transform.DOPunchPosition(Vector3.left * 0.35f, 0.15f, 8, 0.5f);
+            // [Z 수정] PunchDir — Z 성분 차단
+            sh.DOPunchPosition(
+                BattlePhysicsHelper.PunchDir(Vector3.left * 0.35f), 0.15f, 8, 0.5f);
             yield return new WaitForSeconds(0.4f);
 
             yield return StartCoroutine(ReturnFromCombo(_strikeSentry, strikePrePos));
@@ -407,42 +430,63 @@ namespace SENTRY
 
             var (strikeComboPos, _, wallComboPos) = CalcSafeComboPositions(target);
 
-            _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
-            yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
+            Transform st = _strikeSentry.transform;
+            Transform wl = _wallSentry.transform;
+
+            st.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st));
+
+            yield return wl.DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                .WaitForCompletion();
+
+            BattlePhysicsHelper.ClampZ(st);
+            BattlePhysicsHelper.ClampZ(wl);
 
             yield return new WaitForSeconds(0.2f);
 
-            // Strike → Wall 옆 타격 위치 (Y축 고정 + 벽 보정)
-            Vector3 rawHit = _wallSentry.transform.position + Vector3.left * 0.3f;
-            rawHit.y = _strikeSentry.transform.position.y; // Y 고정
+            // ── Strike → Wall 옆 타격 ──
+            // [Z 수정] z = 0 강제
+            Vector3 rawHit = new Vector3(
+                wl.position.x - 0.3f,
+                st.position.y,
+                0f);
             Vector3 safeHit = BattlePhysicsHelper.GetSafeTarget(
-                _strikeSentry.transform.position, rawHit, _sentryRadius, _wallLayer);
+                st.position, rawHit, _sentryRadius, _wallLayer);
 
-            yield return _strikeSentry.transform
-                .DOMove(safeHit, 0.1f).SetEase(Ease.InExpo).WaitForCompletion();
+            yield return st.DOMove(safeHit, 0.1f).SetEase(Ease.InExpo)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st))
+                .WaitForCompletion();
 
-            _strikeSentry.transform.DOShakePosition(0.2f, 0.3f, 15, 90f);
+            BattlePhysicsHelper.ClampZ(st);
+
+            // [Z 수정] ShakeStrength
+            st.DOShakePosition(0.2f, BattlePhysicsHelper.ShakeStrength(0.3f), 15, 90f);
             yield return new WaitForSeconds(0.08f);
 
-            // Wall → 적 위치 돌진 (Y축 고정 + 벽 보정)
+            // ── Wall → 적 위치 돌진 ──
             if (target != null)
             {
+                // [Z 수정] z = 0 강제
                 Vector3 rawCharge = new Vector3(
                     target.transform.position.x,
-                    _wallSentry.transform.position.y,
-                    target.transform.position.z);
+                    wl.position.y,
+                    0f);
                 Vector3 safeCharge = BattlePhysicsHelper.GetSafeTarget(
-                    _wallSentry.transform.position, rawCharge, _sentryRadius, _wallLayer);
+                    wl.position, rawCharge, _sentryRadius, _wallLayer);
 
-                yield return _wallSentry.transform
-                    .DOMove(safeCharge, 0.2f).SetEase(Ease.InQuart).WaitForCompletion();
+                yield return wl.DOMove(safeCharge, 0.2f).SetEase(Ease.InQuart)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                    .WaitForCompletion();
+
+                BattlePhysicsHelper.ClampZ(wl);
 
                 int comboDamage = Mathf.RoundToInt(15 * _combo2DamageMultiplier);
-                target.TakeDamage(comboDamage, HitType.Strike, _wallSentry.transform.position);
+                target.TakeDamage(comboDamage, HitType.Strike, wl.position);
 
-                _wallSentry.transform.DOShakePosition(0.3f, 0.4f, 20, 90f);
-                _wallSentry.transform.DOPunchScale(Vector3.one * 0.3f, 0.3f, 5, 0.5f);
+                // [Z 수정] ShakeStrength
+                wl.DOShakePosition(0.3f, BattlePhysicsHelper.ShakeStrength(0.4f), 20, 90f);
+                wl.DOPunchScale(Vector3.one * 0.3f, 0.3f, 5, 0.5f);
             }
 
             yield return new WaitForSeconds(0.5f);
@@ -476,9 +520,18 @@ namespace SENTRY
 
             var (_, shootComboPos, wallComboPos) = CalcSafeComboPositions(target);
 
-            _shootSentry.transform.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack);
-            yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
+            Transform sh = _shootSentry.transform;
+            Transform wl = _wallSentry.transform;
+
+            sh.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(sh));
+
+            yield return wl.DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                .WaitForCompletion();
+
+            BattlePhysicsHelper.ClampZ(sh);
+            BattlePhysicsHelper.ClampZ(wl);
 
             yield return new WaitForSeconds(0.2f);
 
@@ -488,41 +541,53 @@ namespace SENTRY
                 for (int i = 0; i < 2; i++)
                 {
                     _shootSentry.FireBullet(target.transform, comboDamage);
-                    _shootSentry.transform.DOPunchPosition(Vector3.left * 0.1f, 0.08f, 5, 0.3f);
+                    // [Z 수정] PunchDir
+                    sh.DOPunchPosition(
+                        BattlePhysicsHelper.PunchDir(Vector3.left * 0.1f), 0.08f, 5, 0.3f);
                     yield return new WaitForSeconds(0.18f);
                 }
             }
 
             yield return new WaitForSeconds(0.15f);
 
-            // Wall 하늘 위 → 적 위치 낙하 (벽 보정)
+            // ── Wall 낙하 ──
             if (target != null)
             {
-                Vector3 skyPos = target.transform.position + Vector3.up * 5f;
+                // [Z 수정] skyPos.z = 0 강제. Vector3.up은 Y만 변경하므로 Z는 0 유지
+                Vector3 skyPos = new Vector3(
+                    target.transform.position.x,
+                    target.transform.position.y + 5f,
+                    0f);    // ← Z 명시적 0 고정
 
-                // 하늘 위치도 벽 보정 (극히 드물지만 천장이 있는 경우 대비)
                 Vector3 safeSky = BattlePhysicsHelper.GetSafeTarget(
-                    _wallSentry.transform.position, skyPos, _sentryRadius, _wallLayer);
+                    wl.position, skyPos, _sentryRadius, _wallLayer);
 
-                _wallSentry.transform.position = safeSky;
-                _wallSentry.transform.localScale = Vector3.zero;
-                _wallSentry.transform.DOScale(Vector3.one, 0.15f).SetEase(Ease.OutBack);
+                wl.position = safeSky;
+                wl.localScale = Vector3.zero;
+                wl.DOScale(Vector3.one, 0.15f).SetEase(Ease.OutBack);
 
                 yield return new WaitForSeconds(0.2f);
 
-                // 낙하 — 적 위치로 벽 보정
-                Vector3 rawDrop = target.transform.position;
+                // [Z 수정] rawDrop.z = 0 강제
+                Vector3 rawDrop = new Vector3(
+                    target.transform.position.x,
+                    target.transform.position.y,
+                    0f);
                 Vector3 safeDrop = BattlePhysicsHelper.GetSafeTarget(
-                    _wallSentry.transform.position, rawDrop, _sentryRadius, _wallLayer);
+                    wl.position, rawDrop, _sentryRadius, _wallLayer);
 
-                yield return _wallSentry.transform
-                    .DOMove(safeDrop, 0.22f).SetEase(Ease.InQuart).WaitForCompletion();
+                yield return wl.DOMove(safeDrop, 0.22f).SetEase(Ease.InQuart)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                    .WaitForCompletion();
+
+                BattlePhysicsHelper.ClampZ(wl);
 
                 int wallDamage = Mathf.RoundToInt(15 * _combo2DamageMultiplier);
-                target.TakeDamage(wallDamage, HitType.Strike, _wallSentry.transform.position);
+                target.TakeDamage(wallDamage, HitType.Strike, wl.position);
 
-                _wallSentry.transform.DOShakePosition(0.3f, 0.35f, 18, 90f);
-                _wallSentry.transform.DOPunchScale(Vector3.one * 0.4f, 0.3f, 6, 0.5f);
+                // [Z 수정] ShakeStrength
+                wl.DOShakePosition(0.3f, BattlePhysicsHelper.ShakeStrength(0.35f), 18, 90f);
+                wl.DOPunchScale(Vector3.one * 0.4f, 0.3f, 6, 0.5f);
             }
 
             yield return new WaitForSeconds(0.5f);
@@ -558,82 +623,112 @@ namespace SENTRY
 
             var (strikeComboPos, shootComboPos, wallComboPos) = CalcSafeComboPositions(target);
 
-            _strikeSentry.transform.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack);
-            _shootSentry.transform.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack);
-            yield return _wallSentry.transform
-                .DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack).WaitForCompletion();
+            Transform st = _strikeSentry.transform;
+            Transform sh = _shootSentry.transform;
+            Transform wl = _wallSentry.transform;
+
+            st.DOMove(strikeComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st));
+            sh.DOMove(shootComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(sh));
+
+            yield return wl.DOMove(wallComboPos, 0.5f).SetEase(Ease.OutBack)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                .WaitForCompletion();
+
+            BattlePhysicsHelper.ClampZ(st);
+            BattlePhysicsHelper.ClampZ(sh);
+            BattlePhysicsHelper.ClampZ(wl);
 
             yield return new WaitForSeconds(0.2f);
 
             int combo3Damage = Mathf.RoundToInt(20 * _combo3DamageMultiplier);
 
-            // 1단계: Strike → 날리기 (Y축 고정 + 벽 보정)
+            // ── 1단계: Strike → 날리기 ──
+            // [Z 수정] z = 0 강제
             Vector3 rawStrikeHit = new Vector3(
                 target.transform.position.x - 0.3f,
-                _strikeSentry.transform.position.y,
-                target.transform.position.z);
+                st.position.y,
+                0f);
             Vector3 safeStrikeHit = BattlePhysicsHelper.GetSafeTarget(
-                _strikeSentry.transform.position, rawStrikeHit, _sentryRadius, _wallLayer);
+                st.position, rawStrikeHit, _sentryRadius, _wallLayer);
 
-            yield return _strikeSentry.transform
-                .DOMove(safeStrikeHit, 0.12f).SetEase(Ease.InExpo).WaitForCompletion();
+            yield return st.DOMove(safeStrikeHit, 0.12f).SetEase(Ease.InExpo)
+                .OnUpdate(() => BattlePhysicsHelper.ClampZ(st))
+                .WaitForCompletion();
+
+            BattlePhysicsHelper.ClampZ(st);
 
             if (target != null)
-                target.TakeDamage(combo3Damage / 4, HitType.Strike, _strikeSentry.transform.position);
+                target.TakeDamage(
+                    combo3Damage / 4, HitType.Strike, st.position);
 
-            _strikeSentry.transform.DOShakePosition(0.2f, 0.3f, 15, 90f);
+            // [Z 수정] ShakeStrength
+            st.DOShakePosition(0.2f, BattlePhysicsHelper.ShakeStrength(0.3f), 15, 90f);
             yield return new WaitForSeconds(0.15f);
 
-            // 2단계: Wall → 붙잡기 (Y축 고정 + 벽 보정)
+            // ── 2단계: Wall → 붙잡기 ──
             if (target != null)
             {
+                // [Z 수정] z = 0 강제
                 Vector3 rawWallGrab = new Vector3(
                     target.transform.position.x + 0.5f,
-                    _wallSentry.transform.position.y,
-                    target.transform.position.z);
+                    wl.position.y,
+                    0f);
                 Vector3 safeWallGrab = BattlePhysicsHelper.GetSafeTarget(
-                    _wallSentry.transform.position, rawWallGrab, _sentryRadius, _wallLayer);
+                    wl.position, rawWallGrab, _sentryRadius, _wallLayer);
 
-                yield return _wallSentry.transform
-                    .DOMove(safeWallGrab, 0.18f).SetEase(Ease.InQuad).WaitForCompletion();
+                yield return wl.DOMove(safeWallGrab, 0.18f).SetEase(Ease.InQuad)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(wl))
+                    .WaitForCompletion();
 
-                _wallSentry.transform.DOShakePosition(0.2f, 0.25f, 12, 90f);
+                BattlePhysicsHelper.ClampZ(wl);
+
+                // [Z 수정] ShakeStrength
+                wl.DOShakePosition(0.2f, BattlePhysicsHelper.ShakeStrength(0.25f), 12, 90f);
             }
 
             yield return new WaitForSeconds(0.3f);
 
-            // 3단계: Shoot 연속 발사
+            // ── 3단계: Shoot 연속 발사 ──
             int shootDamage = Mathf.RoundToInt(20 * _combo3DamageMultiplier);
             for (int i = 0; i < _combo3BulletCount; i++)
             {
                 if (target == null) break;
                 _shootSentry.FireBullet(target.transform, shootDamage);
-                _shootSentry.transform.DOPunchPosition(
-                    Vector3.left * 0.08f, _combo3BulletInterval * 0.5f, 3, 0.2f);
+                // [Z 수정] PunchDir
+                sh.DOPunchPosition(
+                    BattlePhysicsHelper.PunchDir(Vector3.left * 0.08f),
+                    _combo3BulletInterval * 0.5f, 3, 0.2f);
                 yield return new WaitForSeconds(_combo3BulletInterval);
             }
 
             yield return new WaitForSeconds(0.2f);
 
-            // 4단계: 최종 밀치기 — AddForce 제거, DOMove + GetSafeTarget으로 교체
-            // [버그 수정] 기존 AddForce(Kinematic에서 무시됨)를
-            //             DOMove + CircleCast 보정으로 교체합니다.
+            // ── 4단계: 최종 밀치기 ──
             if (target != null)
             {
-                target.TakeDamage(combo3Damage / 3, HitType.Strike, _wallSentry.transform.position);
+                target.TakeDamage(
+                    combo3Damage / 3, HitType.Strike, wl.position);
                 target.Stun(1.5f);
 
-                // [Y축 고정] FlatDirection으로 X축 방향만 계산
+                // [Z 수정] FlatDirection(X방향만) + z=0 보장된 GetSafeTarget
                 Vector3 pushDir = BattlePhysicsHelper.FlatDirection(
-                    _wallSentry.transform.position, target.transform.position);
-                Vector3 rawPush = target.transform.position + pushDir * _combo3FinalPushDist;
+                    wl.position, target.transform.position);
+                Vector3 rawPush = new Vector3(
+                    target.transform.position.x + pushDir.x * _combo3FinalPushDist,
+                    target.transform.position.y,
+                    0f);
                 Vector3 safePush = BattlePhysicsHelper.GetSafeTarget(
                     target.transform.position, rawPush, _enemyRadius, _wallLayer);
 
-                target.transform.DOMove(safePush, _combo3FinalPushDuration).SetEase(Ease.OutExpo);
+                Transform et = target.transform;
+                et.DOMove(safePush, _combo3FinalPushDuration).SetEase(Ease.OutExpo)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(et));
             }
 
-            _wallSentry.transform.DOShakePosition(0.3f, 0.45f, 20, 90f);
+            // [Z 수정] ShakeStrength
+            wl.DOShakePosition(0.3f, BattlePhysicsHelper.ShakeStrength(0.45f), 20, 90f);
             yield return new WaitForSeconds(0.5f);
 
             yield return StartCoroutine(ReturnFromCombo(_strikeSentry, strikePrePos));
@@ -679,15 +774,17 @@ namespace SENTRY
         private float GetBest2ComboCooldownRatio()
         {
             float best = 0f;
-            if (_strikeSentry != null && !_strikeSentry.IsKnockedOut &&
-                _shootSentry != null && !_shootSentry.IsKnockedOut)
+            bool strikeAlive = _strikeSentry != null && !_strikeSentry.IsKnockedOut;
+            bool shootAlive = _shootSentry != null && !_shootSentry.IsKnockedOut;
+            bool wallAlive = _wallSentry != null && !_wallSentry.IsKnockedOut;
+
+            if (strikeAlive && shootAlive)
                 best = Mathf.Max(best, GetRatio(_comboACooldownTimer, _comboACooldown));
-            if (_strikeSentry != null && !_strikeSentry.IsKnockedOut &&
-                _wallSentry != null && !_wallSentry.IsKnockedOut)
+            if (strikeAlive && wallAlive)
                 best = Mathf.Max(best, GetRatio(_comboBCooldownTimer, _comboBCooldown));
-            if (_shootSentry != null && !_shootSentry.IsKnockedOut &&
-                _wallSentry != null && !_wallSentry.IsKnockedOut)
+            if (shootAlive && wallAlive)
                 best = Mathf.Max(best, GetRatio(_comboCCooldownTimer, _comboCCooldown));
+
             return best;
         }
     }

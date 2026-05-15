@@ -88,6 +88,18 @@ namespace SENTRY
         [SerializeField] private float _hudRefreshRate = 0.1f;
 
         // ─────────────────────────────────────────
+        //  Inspector — 마커 설정
+        // ─────────────────────────────────────────
+
+        [Header("슬롯 RectTransform (능력 마커 기준점)")]
+        [Tooltip("능력1 마커가 이동할 기준점. 슬롯 루트 RectTransform을 연결하세요.")]
+        [SerializeField] private RectTransform _slot1Rect;
+
+        [SerializeField] private RectTransform _slot2Rect;
+
+        [SerializeField] private RectTransform _slot3Rect;
+
+        // ─────────────────────────────────────────
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
@@ -251,6 +263,10 @@ namespace SENTRY
             }
         }
 
+        // ─────────────────────────────────────────
+        //  마커 위치 갱신
+        // ─────────────────────────────────────────
+
         /// <summary>
         /// 배틀 종료 후 슬롯 데이터를 초기화합니다.
         /// SlideOut() 완료 후 자동 호출됩니다.
@@ -268,6 +284,43 @@ namespace SENTRY
 
             Debug.Log("[EnemyBattleUI] 슬롯 초기화 완료");
         }
+
+        /// <summary>
+        /// 현재 등록된(살아있는) 적 슬롯 수를 반환합니다.
+        /// PlayerAbility에서 Q 능력 선택 가능 슬롯 수 확인에 사용합니다.
+        /// </summary>
+        public int ActiveSlotCount
+        {
+            get
+            {
+                int count = 0;
+                foreach (var e in _enemies)
+                    if (e != null && !e.IsDead) count++;
+                return count;
+            }
+        }
+
+        /// <summary>
+        /// 슬롯 인덱스(0~2)에 해당하는 Enemy를 반환합니다.
+        /// PlayerAbility Q 능력 확정 시 호출합니다.
+        /// </summary>
+        public Enemy GetEnemyBySlot(int slotIndex)
+        {
+            if (slotIndex < 0 || slotIndex >= _enemies.Length) return null;
+            return _enemies[slotIndex];
+        }
+
+        /// <summary>
+        /// 슬롯 인덱스(0~2)에 해당하는 슬롯 루트 RectTransform을 반환합니다.
+        /// AbilityMarkerController가 UI 마커를 이동할 목표 위치로 사용합니다.
+        /// </summary>
+        public RectTransform GetSlotRect(int slotIndex) => slotIndex switch
+        {
+            0 => _slot1Rect,
+            1 => _slot2Rect,
+            2 => _slot3Rect,
+            _ => null
+        };
 
         // ─────────────────────────────────────────
         //  HUD 주기 갱신

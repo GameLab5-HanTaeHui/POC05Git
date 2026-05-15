@@ -194,8 +194,9 @@ namespace SENTRY
         {
             if (_isDead || _isStunned || !_shouldMove || !_isBattleStarted) return;
             if (_rigid2D != null)
-                _rigid2D.MovePosition(
-                    _rigid2D.position + _moveDir * _moveSpeed * Time.fixedDeltaTime);
+                _rigid2D.MovePosition(_rigid2D.position + _moveDir * _moveSpeed * Time.fixedDeltaTime);
+            if (_isBattleStarted && !_isDead)
+                BattlePhysicsHelper.ClampZ(transform);
         }
 
         // ─────────────────────────────────────────
@@ -309,7 +310,7 @@ namespace SENTRY
             _currentHp = Mathf.Max(_currentHp, 0);
 
             // 피격 연출
-            transform.DOShakePosition(0.15f, 0.2f, 10, 90f);
+            transform.DOShakePosition(0.15f, BattlePhysicsHelper.ShakeStrength(0.2f), 10, 90f);
             if (_spriteRenderer != null)
                 _spriteRenderer.DOColor(Color.red, 0.05f)
                     .SetLoops(4, LoopType.Yoyo)
@@ -336,7 +337,8 @@ namespace SENTRY
                     radius: _colliderRadius,
                     wallLayer: _wallLayer);
 
-                transform.DOMove(safeTarget, _knockDuration).SetEase(Ease.OutQuart);
+                transform.DOMove(safeTarget, _knockDuration).SetEase(Ease.OutQuart)
+                    .OnUpdate(() => BattlePhysicsHelper.ClampZ(transform));
             }
 
             EnemyBattleUIManager.Instance?.OnHpChanged(this);

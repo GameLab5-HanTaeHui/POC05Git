@@ -9,11 +9,16 @@ namespace SENTRY
     /// <summary>
     /// 플레이어 측 배틀 HUD를 전담하는 싱글턴 매니저.
     ///
-    /// [버그 수정]
-    /// - Start()에 Inspector 연결 자동 검증 추가
-    ///   null인 슬롯을 Console 경고로 출력하여 연결 누락을 빠르게 발견할 수 있습니다.
-    /// - WallSentry SkillGauge / MaxSkillGauge 프로퍼티 public 여부 확인
-    ///   (GetSkillRatio 내부 WallSentry 분기에서 접근)
+    /// [능력 UI 업데이트 흐름]
+    ///   PlayerAbility._abilityNTimer 감소
+    ///     → AbilityNCooldownRatio (0→1 반환)
+    ///       → RefreshAbilitySlot()
+    ///           → fill.fillAmount = 1f - ratio   (1→0, Radial 360 어두운 오버레이 줄어듦)
+    ///           → text.text = 남은 초             (15→0)
+    ///
+    /// [_playerAbility 미연결 시]
+    ///   RefreshAbilityHud()가 즉시 return되어 Fill/Text가 전혀 갱신되지 않습니다.
+    ///   ValidateInspectorConnections()에서 경고를 출력하므로 Console을 먼저 확인하세요.
     /// </summary>
     public class PlayerBattleUIManager : MonoBehaviour
     {
@@ -25,10 +30,12 @@ namespace SENTRY
 
         [Header("센트리 참조 ★ 반드시 연결 필요")]
         [SerializeField] private StrikeSentry _strikeSentry;
-        [SerializeField] private ShootSentry _shootSentry;
-        [SerializeField] private WallSentry _wallSentry;
+        [SerializeField] private ShootSentry  _shootSentry;
+        [SerializeField] private WallSentry   _wallSentry;
 
-        [Header("플레이어 능력 참조")]
+        [Header("플레이어 능력 참조 ★ 반드시 연결 필요")]
+        [Tooltip("Player 오브젝트의 PlayerAbility 컴포넌트를 연결하세요.\n" +
+                 "미연결 시 능력 쿨타임 UI가 전혀 갱신되지 않습니다.")]
         [SerializeField] private PlayerAbility _playerAbility;
 
         // ─────────────────────────────────────────
@@ -40,57 +47,59 @@ namespace SENTRY
         [SerializeField] private RectTransform _abilityHudPanel;
 
         [Header("센트리 HUD 슬라이드")]
-        [SerializeField] private bool _sentrySlideOnX = true;
-        [SerializeField] private bool _sentrySlideFromPositive = false;
-        [SerializeField] private float _sentrySlideDistance = 600f;
+        [SerializeField] private bool  _sentrySlideOnX          = true;
+        [SerializeField] private bool  _sentrySlideFromPositive = false;
+        [SerializeField] private float _sentrySlideDistance     = 600f;
 
         [Header("능력 HUD 슬라이드")]
-        [SerializeField] private bool _abilitySlideOnX = false;
-        [SerializeField] private bool _abilitySlideFromPositive = false;
-        [SerializeField] private float _abilitySlideDistance = 400f;
+        [SerializeField] private bool  _abilitySlideOnX          = false;
+        [SerializeField] private bool  _abilitySlideFromPositive = false;
+        [SerializeField] private float _abilitySlideDistance     = 400f;
 
         [Header("슬라이드 애니메이션")]
-        [SerializeField] private float _slideDuration = 0.5f;
-        [SerializeField] private Ease _slideInEase = Ease.OutBack;
-        [SerializeField] private Ease _slideOutEase = Ease.InBack;
-        [SerializeField] private float _slideStagger = 0.08f;
+        [SerializeField] private float _slideDuration  = 0.5f;
+        [SerializeField] private Ease  _slideInEase    = Ease.OutBack;
+        [SerializeField] private Ease  _slideOutEase   = Ease.InBack;
+        [SerializeField] private float _slideStagger   = 0.08f;
 
         // ─────────────────────────────────────────
-        //  Inspector — 센트리 HUD (HP, 스킬, 레벨, EXP, KO)
+        //  Inspector — 센트리 HUD
         // ─────────────────────────────────────────
 
         [Header("타격 센트리 HUD ★ 반드시 연결 필요")]
-        [SerializeField] private Image _strikeHpFill;
-        [SerializeField] private TMP_Text _strikeHpText;
-        [SerializeField] private Image _strikeSkillFill;
-        [SerializeField] private TMP_Text _strikeLevelText;
-        [SerializeField] private Image _strikeExpFill;
+        [SerializeField] private Image      _strikeHpFill;
+        [SerializeField] private TMP_Text   _strikeHpText;
+        [SerializeField] private Image      _strikeSkillFill;
+        [SerializeField] private TMP_Text   _strikeLevelText;
+        [SerializeField] private Image      _strikeExpFill;
         [SerializeField] private GameObject _strikeKoIcon;
 
         [Header("사격 센트리 HUD ★ 반드시 연결 필요")]
-        [SerializeField] private Image _shootHpFill;
-        [SerializeField] private TMP_Text _shootHpText;
-        [SerializeField] private Image _shootSkillFill;
-        [SerializeField] private TMP_Text _shootLevelText;
-        [SerializeField] private Image _shootExpFill;
+        [SerializeField] private Image      _shootHpFill;
+        [SerializeField] private TMP_Text   _shootHpText;
+        [SerializeField] private Image      _shootSkillFill;
+        [SerializeField] private TMP_Text   _shootLevelText;
+        [SerializeField] private Image      _shootExpFill;
         [SerializeField] private GameObject _shootKoIcon;
 
         [Header("벽 센트리 HUD ★ 반드시 연결 필요")]
-        [SerializeField] private Image _wallHpFill;
-        [SerializeField] private TMP_Text _wallHpText;
-        [SerializeField] private Image _wallSkillFill;
-        [SerializeField] private TMP_Text _wallLevelText;
-        [SerializeField] private Image _wallExpFill;
+        [SerializeField] private Image      _wallHpFill;
+        [SerializeField] private TMP_Text   _wallHpText;
+        [SerializeField] private Image      _wallSkillFill;
+        [SerializeField] private TMP_Text   _wallLevelText;
+        [SerializeField] private Image      _wallExpFill;
         [SerializeField] private GameObject _wallKoIcon;
 
         // ─────────────────────────────────────────
         //  Inspector — 능력 HUD
         // ─────────────────────────────────────────
 
-        [Header("플레이어 능력 쿨타임")]
-        [SerializeField] private Image _ability1CooldownFill;
-        [SerializeField] private Image _ability2CooldownFill;
-        [SerializeField] private Image _ability3CooldownFill;
+        [Header("플레이어 능력 쿨타임 ★ 반드시 연결 필요")]
+        [Tooltip("Radial 360 Fill Image를 연결하세요.")]
+        [SerializeField] private Image    _ability1CooldownFill;
+        [SerializeField] private Image    _ability2CooldownFill;
+        [SerializeField] private Image    _ability3CooldownFill;
+        [Tooltip("남은 초를 표시할 TMP_Text를 연결하세요.")]
         [SerializeField] private TMP_Text _ability1CooldownText;
         [SerializeField] private TMP_Text _ability2CooldownText;
         [SerializeField] private TMP_Text _ability3CooldownText;
@@ -100,15 +109,15 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         [Header("공용 콤보 게이지")]
-        [SerializeField] private Image _comboGaugeFill;
+        [SerializeField] private Image    _comboGaugeFill;
         [SerializeField] private TMP_Text _comboGaugeText;
 
-        [Header("2콤보 쿨타임 아이콘 (센트리 슬롯별 1개)")]
+        [Header("2콤보 쿨타임 아이콘")]
         [SerializeField] private Image _strike2ComboFill;
         [SerializeField] private Image _shoot2ComboFill;
         [SerializeField] private Image _wall2ComboFill;
 
-        [Header("3콤보 쿨타임 아이콘 (센트리 슬롯별 1개)")]
+        [Header("3콤보 쿨타임 아이콘")]
         [SerializeField] private Image _strike3ComboFill;
         [SerializeField] private Image _shoot3ComboFill;
         [SerializeField] private Image _wall3ComboFill;
@@ -117,13 +126,22 @@ namespace SENTRY
         [SerializeField] private float _sentryHudRefreshRate = 0.1f;
 
         // ─────────────────────────────────────────
+        //  Inspector — 마커 기준점
+        // ─────────────────────────────────────────
+
+        [Header("센트리 슬롯 RectTransform (능력 마커 기준점)")]
+        [SerializeField] private RectTransform _strikeSlotRect;
+        [SerializeField] private RectTransform _shootSlotRect;
+        [SerializeField] private RectTransform _wallSlotRect;
+
+        // ─────────────────────────────────────────
         //  내부 상태
         // ─────────────────────────────────────────
 
         private Vector2 _sentryHudOnPos;
         private Vector2 _abilityHudOnPos;
-        private Tween _sentryTween;
-        private Tween _abilityTween;
+        private Tween   _sentryTween;
+        private Tween   _abilityTween;
 
         // ─────────────────────────────────────────
         //  유니티 생명주기
@@ -137,7 +155,6 @@ namespace SENTRY
 
         private void Start()
         {
-            // ── 슬라이드 초기 위치 저장 → 화면 밖으로 이동 ──
             if (_sentryHudPanel != null)
             {
                 _sentryHudOnPos = _sentryHudPanel.anchoredPosition;
@@ -151,11 +168,7 @@ namespace SENTRY
                     _abilityHudOnPos, _abilitySlideOnX, _abilitySlideFromPositive, _abilitySlideDistance);
             }
 
-            // ── Inspector 연결 검증 ──
-            // 실시간 갱신 / 스킬 Fill / KO 아이콘이 동작하지 않는다면
-            // 아래 Console 경고에서 null인 슬롯을 확인하세요.
             ValidateInspectorConnections();
-
             StartCoroutine(SentryHudRefreshRoutine());
         }
 
@@ -166,34 +179,50 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  Inspector 검증 (버그 2, 3, 4 진단용)
+        //  Inspector 검증
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// Start()에서 1회 실행되어 null인 Inspector 슬롯을 Console 경고로 출력합니다.
-        /// 실시간 갱신·스킬 Fill·KO 아이콘이 동작하지 않을 때 이 로그를 먼저 확인하세요.
+        /// null인 Inspector 슬롯을 Console 경고로 출력합니다.
+        /// 능력 UI가 갱신되지 않을 때 이 로그를 먼저 확인하세요.
         /// </summary>
         private void ValidateInspectorConnections()
         {
-            // 센트리 참조
-            if (_strikeSentry == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeSentry 미연결");
-            if (_shootSentry == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootSentry 미연결");
-            if (_wallSentry == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallSentry 미연결");
+            if (_strikeSentry   == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeSentry 미연결");
+            if (_shootSentry    == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootSentry 미연결");
+            if (_wallSentry     == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallSentry 미연결");
 
-            // HP 바
-            if (_strikeHpFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeHpFill 미연결");
-            if (_shootHpFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootHpFill 미연결");
-            if (_wallHpFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallHpFill 미연결");
+            if (_strikeHpFill   == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeHpFill 미연결");
+            if (_shootHpFill    == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootHpFill 미연결");
+            if (_wallHpFill     == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallHpFill 미연결");
 
-            // 스킬 게이지 Fill (버그 3)
-            if (_strikeSkillFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeSkillFill 미연결 — 스킬 게이지 표시 안됨");
-            if (_shootSkillFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootSkillFill 미연결 — 스킬 게이지 표시 안됨");
-            if (_wallSkillFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallSkillFill 미연결 — 스킬 게이지 표시 안됨");
+            if (_strikeSkillFill == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeSkillFill 미연결");
+            if (_shootSkillFill  == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootSkillFill 미연결");
+            if (_wallSkillFill   == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallSkillFill 미연결");
 
-            // KO 아이콘 (버그 4)
-            if (_strikeKoIcon == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeKoIcon 미연결 — KO 아이콘 표시 안됨");
-            if (_shootKoIcon == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootKoIcon 미연결 — KO 아이콘 표시 안됨");
-            if (_wallKoIcon == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallKoIcon 미연결 — KO 아이콘 표시 안됨");
+            if (_strikeKoIcon   == null) Debug.LogWarning("[PlayerBattleUI] ★ _strikeKoIcon 미연결");
+            if (_shootKoIcon    == null) Debug.LogWarning("[PlayerBattleUI] ★ _shootKoIcon 미연결");
+            if (_wallKoIcon     == null) Debug.LogWarning("[PlayerBattleUI] ★ _wallKoIcon 미연결");
+
+            // ── 능력 UI 핵심 체크 ──
+            if (_playerAbility == null)
+                Debug.LogError("[PlayerBattleUI] ★★★ _playerAbility 미연결 — " +
+                               "능력 쿨타임 Fill/Text가 전혀 갱신되지 않습니다! " +
+                               "Player 오브젝트의 PlayerAbility 컴포넌트를 연결하세요.");
+
+            if (_ability1CooldownFill == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability1CooldownFill 미연결 — 능력1 Fill 안됨");
+            if (_ability2CooldownFill == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability2CooldownFill 미연결 — 능력2 Fill 안됨");
+            if (_ability3CooldownFill == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability3CooldownFill 미연결 — 능력3 Fill 안됨");
+
+            if (_ability1CooldownText == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability1CooldownText 미연결 — 능력1 Text 안됨");
+            if (_ability2CooldownText == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability2CooldownText 미연결 — 능력2 Text 안됨");
+            if (_ability3CooldownText == null)
+                Debug.LogWarning("[PlayerBattleUI] ★ _ability3CooldownText 미연결 — 능력3 Text 안됨");
 
             Debug.Log("[PlayerBattleUI] Inspector 검증 완료");
         }
@@ -241,7 +270,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  센트리 HUD 갱신 (버그 2, 3, 4 핵심)
+        //  센트리 HUD 갱신
         // ─────────────────────────────────────────
 
         private IEnumerator SentryHudRefreshRoutine()
@@ -280,18 +309,14 @@ namespace SENTRY
             if (sentry == null) return;
 
             bool isKo = sentry.IsKnockedOut;
-
-            // 버그 4 — KO 아이콘
             if (koIcon != null) koIcon.SetActive(isKo);
 
-            // 버그 2 — HP 실시간 갱신
             if (hpFill != null)
                 hpFill.fillAmount = sentry.MaxHp > 0
                     ? (float)sentry.CurrentHp / sentry.MaxHp : 0f;
             if (hpText != null)
                 hpText.text = $"{sentry.CurrentHp}/{sentry.MaxHp}";
 
-            // 버그 3 — 스킬 게이지 Fill
             if (skillFill != null)
                 skillFill.fillAmount = GetSkillRatio(sentry);
 
@@ -302,45 +327,86 @@ namespace SENTRY
                     ? (float)sentry.CurrentExp / sentry.RequiredExp : 1f;
         }
 
-        /// <summary>
-        /// 센트리 타입별 스킬 게이지 비율을 반환합니다.
-        /// WallSentry도 SkillGauge / MaxSkillGauge 프로퍼티가 public이어야 합니다.
-        /// </summary>
         private float GetSkillRatio(SentryBase sentry)
         {
-            if (sentry is StrikeSentry s)
-                return s.MaxSkillGauge > 0 ? s.SkillGauge / s.MaxSkillGauge : 0f;
-            if (sentry is ShootSentry h)
-                return h.MaxSkillGauge > 0 ? h.SkillGauge / h.MaxSkillGauge : 0f;
-            if (sentry is WallSentry w)
-                return w.MaxSkillGauge > 0 ? w.SkillGauge / w.MaxSkillGauge : 0f;
+            if (sentry is StrikeSentry s) return s.MaxSkillGauge > 0 ? s.SkillGauge / s.MaxSkillGauge : 0f;
+            if (sentry is ShootSentry  h) return h.MaxSkillGauge > 0 ? h.SkillGauge / h.MaxSkillGauge : 0f;
+            if (sentry is WallSentry   w) return w.MaxSkillGauge > 0 ? w.SkillGauge / w.MaxSkillGauge : 0f;
             return 0f;
         }
+
+        // ─────────────────────────────────────────
+        //  마커 기준점
+        // ─────────────────────────────────────────
+
+        public RectTransform GetSentrySlotRect(int slotIndex) => slotIndex switch
+        {
+            0 => _strikeSlotRect,
+            1 => _shootSlotRect,
+            2 => _wallSlotRect,
+            _ => null
+        };
 
         // ─────────────────────────────────────────
         //  능력 HUD 갱신
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// Update()에서 매 프레임 호출됩니다.
+        /// _playerAbility가 null이면 즉시 return → Fill/Text 갱신 없음.
+        /// Console에서 "★★★ _playerAbility 미연결" 경고를 확인하세요.
+        /// </summary>
         private void RefreshAbilityHud()
         {
             if (_playerAbility == null) return;
 
-            RefreshAbilitySlot(_ability1CooldownFill, _ability1CooldownText,
-                _playerAbility.Ability1CooldownRatio);
-            RefreshAbilitySlot(_ability2CooldownFill, _ability2CooldownText,
-                _playerAbility.Ability2CooldownRatio);
-            RefreshAbilitySlot(_ability3CooldownFill, _ability3CooldownText,
-                _playerAbility.Ability3CooldownRatio);
+            RefreshAbilitySlot(
+                _ability1CooldownFill, _ability1CooldownText,
+                _playerAbility.Ability1CooldownRatio,
+                _playerAbility.Ability1Cooldown);
+
+            RefreshAbilitySlot(
+                _ability2CooldownFill, _ability2CooldownText,
+                _playerAbility.Ability2CooldownRatio,
+                _playerAbility.Ability2Cooldown);
+
+            RefreshAbilitySlot(
+                _ability3CooldownFill, _ability3CooldownText,
+                _playerAbility.Ability3CooldownRatio,
+                _playerAbility.Ability3Cooldown);
         }
 
-        private void RefreshAbilitySlot(Image fill, TMP_Text text, float ratio)
+        /// <summary>
+        /// 능력 슬롯 UI를 갱신합니다.
+        ///
+        /// [Fill — Radial 360]
+        ///   쿨타임 중 (ratio=0) → fillAmount = 1.0  (어두운 오버레이 꽉 참)
+        ///   사용 가능 (ratio=1) → fillAmount = 0.0  (어두운 오버레이 없음)
+        ///   공식: fillAmount = 1f - ratio
+        ///
+        /// [Text — 남은 초]
+        ///   쿨타임 중 → 남은 초 표시 (15 → 14 → ... → 1 → 0.5 → 사라짐)
+        ///   사용 가능 → Text 오브젝트 비활성화
+        ///   공식: remainSec = (1f - ratio) * cooldown
+        /// </summary>
+        private void RefreshAbilitySlot(Image fill, TMP_Text text, float ratio, float cooldown)
         {
-            if (fill != null) fill.fillAmount = ratio;
-            if (text != null)
+            // Fill: 1→0 방향 (쿨타임 중=꽉 참, 사용가능=비어있음)
+            if (fill != null)
+                fill.fillAmount = 1f - ratio;
+
+            if (text == null) return;
+
+            bool ready = ratio >= 1f;
+            text.gameObject.SetActive(!ready);
+
+            if (!ready)
             {
-                bool ready = ratio >= 1f;
-                text.gameObject.SetActive(!ready);
-                if (!ready) text.text = $"{Mathf.RoundToInt(ratio * 100)}%";
+                // 남은 시간(초) = (1 - ratio) * cooldown  예: 15→0
+                float remainSec = (1f - ratio) * cooldown;
+                text.text = remainSec < 1f
+                    ? $"{remainSec:F1}"
+                    : $"{Mathf.CeilToInt(remainSec)}";
             }
         }
 
@@ -364,13 +430,13 @@ namespace SENTRY
 
             float c2 = SentryComboManager.Instance.Combo2CooldownRatio;
             if (_strike2ComboFill != null) _strike2ComboFill.fillAmount = c2;
-            if (_shoot2ComboFill != null) _shoot2ComboFill.fillAmount = c2;
-            if (_wall2ComboFill != null) _wall2ComboFill.fillAmount = c2;
+            if (_shoot2ComboFill  != null) _shoot2ComboFill.fillAmount  = c2;
+            if (_wall2ComboFill   != null) _wall2ComboFill.fillAmount   = c2;
 
             float c3 = SentryComboManager.Instance.Combo3CooldownRatio;
             if (_strike3ComboFill != null) _strike3ComboFill.fillAmount = c3;
-            if (_shoot3ComboFill != null) _shoot3ComboFill.fillAmount = c3;
-            if (_wall3ComboFill != null) _wall3ComboFill.fillAmount = c3;
+            if (_shoot3ComboFill  != null) _shoot3ComboFill.fillAmount  = c3;
+            if (_wall3ComboFill   != null) _wall3ComboFill.fillAmount   = c3;
         }
 
         // ─────────────────────────────────────────
@@ -382,7 +448,7 @@ namespace SENTRY
             TMP_Text t = null;
             if (_strikeSentry != null && _strikeSentry.SentryName == sentryName) t = _strikeLevelText;
             else if (_shootSentry != null && _shootSentry.SentryName == sentryName) t = _shootLevelText;
-            else if (_wallSentry != null && _wallSentry.SentryName == sentryName) t = _wallLevelText;
+            else if (_wallSentry  != null && _wallSentry.SentryName  == sentryName) t = _wallLevelText;
 
             t?.transform.DOPunchScale(Vector3.one * 0.4f, 0.4f, 5, 0.5f);
             Debug.Log($"<color=yellow>[PlayerBattleUI] {sentryName} 레벨업! Lv.{newLevel}</color>");
