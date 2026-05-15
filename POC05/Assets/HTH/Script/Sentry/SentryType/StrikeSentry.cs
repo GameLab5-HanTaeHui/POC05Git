@@ -143,7 +143,7 @@ namespace SENTRY
         //  전투 AI
         // ─────────────────────────────────────────
 
-        /// <summary>범위 내 가장 가까운 적을 탐색합니다.</summary>
+        /// <summary>범위 내 가장 가까운 생존 적을 탐색합니다.</summary>
         private void FindTarget()
         {
             Collider2D[] hits = Physics2D.OverlapCircleAll(
@@ -156,6 +156,10 @@ namespace SENTRY
 
             foreach (var col in hits)
             {
+                if (col == null) continue;
+                Enemy e = col.GetComponent<Enemy>();
+                if (e == null || e.IsDead) continue;
+
                 float d = Vector2.Distance(transform.position, col.transform.position);
                 if (d < minDist) { minDist = d; closest = col.transform; }
             }
@@ -163,18 +167,14 @@ namespace SENTRY
             _currentTarget = closest;
         }
 
-        /// <summary>
-        /// 타겟을 추적하고 공격 범위 내 진입 시 공격을 시도합니다.
-        ///
-        /// [페이크 쿼터뷰 대응]
-        ///   linearVelocity 직접 할당 → BattleMove() 호출로 변경.
-        ///   BattleMove()는 내부적으로 Rigidbody2D.MovePosition()을 사용하여
-        ///   Kinematic 상태에서도 정상 이동합니다.
-        /// </summary>
+        /// <summary>타겟을 추적하고 공격 범위 내 진입 시 공격을 시도합니다.</summary>
         private void HandleBattleAI()
         {
-            if (_currentTarget == null)
+            // FindTarget ~ HandleBattleAI 사이 프레임에 파괴될 수 있으므로 이중 체크
+            if (_currentTarget == null ||
+                !_currentTarget.gameObject.activeInHierarchy)
             {
+                _currentTarget = null;
                 BattleStop();
                 return;
             }
@@ -183,13 +183,11 @@ namespace SENTRY
 
             if (dist <= _attackRange)
             {
-                // 공격 범위 내 — 정지 후 공격
                 BattleStop();
                 TryAttack();
             }
             else
             {
-                // 적을 향해 추적 이동
                 Vector2 dir = ((Vector2)_currentTarget.position
                                - (Vector2)transform.position).normalized;
                 BattleMove(dir, _chaseSpeed * OverloadSpeedMultiplier);
@@ -200,22 +198,21 @@ namespace SENTRY
         //  기본 공격
         // ─────────────────────────────────────────
 
-        /// <summary>쿨타임이 지났으면 기본 공격을 실행하고 스킬 게이지를 충전합니다.</summary>
+            /// <summary>쿨타임이 지났으면 기본 공격을 실행하고 스킬 게이지를 충전합니다.</summary>
         private void TryAttack()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
             if (_currentTarget == null) return;
 
-            _lastAttackTime = Time.time;
-
             Enemy enemy = _currentTarget.GetComponent<Enemy>();
-            if (enemy != null)
-                enemy.TakeDamage(
-                    Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier),
-                    HitType.Strike,
-                    transform.position);
+            if (enemy == null || enemy.IsDead) { _currentTarget = null; return; }
 
-            // 기본 타격 연출 (폴백 — SkillEffect 없을 때)
+            _lastAttackTime = Time.time;
+            enemy.TakeDamage(
+                Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier),
+                HitType.Strike,
+                transform.position);
+
             Vector3 punchDir =
                 (_currentTarget.position - transform.position).normalized * 0.3f;
             transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);

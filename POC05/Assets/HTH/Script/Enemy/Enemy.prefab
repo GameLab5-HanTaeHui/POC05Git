@@ -179,7 +179,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: daba15a37dfc1f34a8dd085adfc0dc61, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.Enemy
-  _maxHp: 100
+  _level: 1
+  _maxHp: 200
   _moveSpeed: 3
   _detectionRange: 10
   _attackRange: 1.5
@@ -193,3 +194,5 @@ MonoBehaviour:
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4
   _knockDuration: 0.18
+  _aliveTag: Enemy
+  _deadTag: Dead

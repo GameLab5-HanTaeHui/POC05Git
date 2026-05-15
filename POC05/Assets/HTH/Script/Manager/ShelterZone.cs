@@ -27,8 +27,6 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         [Header("쉼터 설정")]
-        [Tooltip("플레이어 HP 초당 회복량")]
-        [SerializeField] private int _playerHealPerSecond = 5;
 
         [Tooltip("KO 센트리 부활 시 회복할 HP 양. 0이면 전량 회복합니다.")]
         [SerializeField] private int _sentryReviveHealAmount = 0;
@@ -63,9 +61,6 @@ namespace SENTRY
         /// <summary>플레이어가 현재 쉼터 안에 있는지 여부</summary>
         private bool _playerInside = false;
 
-        /// <summary>플레이어 체력 컴포넌트 캐시</summary>
-        private PlayerHealth _playerHealth;
-
         /// <summary>회복 코루틴 참조 (중복 실행 방지)</summary>
         private Coroutine _healCoroutine;
 
@@ -93,7 +88,6 @@ namespace SENTRY
             if (!other.CompareTag("Player")) return;
 
             _playerInside = true;
-            _playerHealth = other.GetComponentInChildren<PlayerHealth>();
 
             // 쉼터 활성화 연출
             if (_zoneSprite != null)
@@ -148,9 +142,6 @@ namespace SENTRY
         {
             while (_playerInside)
             {
-                if (_playerHealth != null && !_playerHealth.IsDead)
-                    _playerHealth.Heal(_playerHealPerSecond);
-
                 yield return new WaitForSeconds(1f);
             }
         }

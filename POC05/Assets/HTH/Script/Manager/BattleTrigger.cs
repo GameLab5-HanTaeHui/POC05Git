@@ -76,7 +76,7 @@ namespace SENTRY
         /// <summary>현재 접촉한 플레이어 Transform</summary>
         private Transform _pendingPlayer;
 
-        private Vector3   _startPosition;
+        private Vector3 _startPosition;
         private SpriteRenderer _spriteRenderer;
 
         // ─────────────────────────────────────────
@@ -85,7 +85,7 @@ namespace SENTRY
 
         private void Start()
         {
-            _startPosition  = transform.position;
+            _startPosition = transform.position;
             _spriteRenderer = GetComponent<SpriteRenderer>();
 
             TryAutoFindSentries();
@@ -128,7 +128,7 @@ namespace SENTRY
         {
             if (_triggered) return;
 
-            float targetX  = _startPosition.x +
+            float targetX = _startPosition.x +
                              Random.Range(-_wanderRadius, _wanderRadius);
             Vector3 target = new Vector3(targetX,
                              transform.position.y, transform.position.z);
@@ -158,7 +158,7 @@ namespace SENTRY
             }
 
             _waitingForChoice = true;
-            _pendingPlayer    = other.transform;
+            _pendingPlayer = other.transform;
             transform.DOKill();
 
             if (_playExclamationEffect)
@@ -196,7 +196,7 @@ namespace SENTRY
         {
             if (!_waitingForChoice) return;
             _waitingForChoice = false;
-            _triggered        = true;
+            _triggered = true;
 
             BattleUIManager.Instance?.HideEncounterPanel();
             TriggerBattle(_pendingPlayer);
@@ -236,23 +236,27 @@ namespace SENTRY
 
         /// <summary>
         /// 전투 선택 후 실제 배틀 필드로 전환합니다.
+        ///
+        /// [변경] BattleManager.StartBattle()을 여기서 직접 호출하지 않습니다.
+        ///        FieldManager.EnterBattle()에 encounterData를 함께 전달하면
+        ///        FieldManager가 페이드 인 완료 후 자동으로 StartBattle()을 호출합니다.
+        ///        이렇게 해야 화면이 밝아진 후 전투가 시작됩니다.
         /// </summary>
         private void TriggerBattle(Transform player)
         {
-            Debug.Log($"[BattleTrigger] 배틀 시작! 인카운터: {_encounterData.encounterName}");
+            Debug.Log($"[BattleTrigger] 배틀 전환! 인카운터: {_encounterData.encounterName}");
 
             if (FieldManager.Instance != null)
+            {
                 FieldManager.Instance.SaveReturnPositions(
                     player,
                     _strikeSentryTransform,
                     _shootSentryTransform,
                     _wallSentryTransform);
 
-            if (FieldManager.Instance != null)
-                FieldManager.Instance.EnterBattle(player);
-
-            if (BattleManager.Instance != null)
-                BattleManager.Instance.StartBattle(player, _encounterData);
+                // encounterData를 함께 전달 → FieldManager가 페이드 인 후 StartBattle() 호출
+                FieldManager.Instance.EnterBattle(player, _encounterData);
+            }
 
             gameObject.SetActive(false);
         }

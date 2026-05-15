@@ -152,7 +152,7 @@ namespace SENTRY
         //  전투 AI
         // ─────────────────────────────────────────
 
-        /// <summary>범위 내 가장 가까운 적을 탐색합니다.</summary>
+        /// <summary>범위 내 가장 가까운 생존 적을 탐색합니다.</summary>
         private void FindTarget()
         {
             Collider2D[] hits = Physics2D.OverlapCircleAll(
@@ -165,6 +165,10 @@ namespace SENTRY
 
             foreach (var col in hits)
             {
+                if (col == null) continue;
+                Enemy e = col.GetComponent<Enemy>();
+                if (e == null || e.IsDead) continue;
+
                 float d = Vector2.Distance(transform.position, col.transform.position);
                 if (d < minDist) { minDist = d; closest = col.transform; }
             }
@@ -172,17 +176,13 @@ namespace SENTRY
             _currentTarget = closest;
         }
 
-        /// <summary>
-        /// 적에게 접근하고 근접 시 밀치기를 시도합니다.
-        ///
-        /// [페이크 쿼터뷰 대응]
-        ///   linearVelocity 직접 할당 → BattleMove() 호출로 변경.
-        ///   BattleStop() 호출로 이동 중단도 Kinematic 안전 처리.
-        /// </summary>
+        /// <summary>적에게 접근하고 근접 시 밀치기를 시도합니다.</summary>
         private void HandleBattleAI()
         {
-            if (_currentTarget == null)
+            if (_currentTarget == null ||
+                !_currentTarget.gameObject.activeInHierarchy)
             {
+                _currentTarget = null;
                 BattleStop();
                 return;
             }
@@ -192,13 +192,9 @@ namespace SENTRY
                            - (Vector2)transform.position).normalized;
 
             if (dist > 1.0f)
-            {
-                // 적에게 접근
                 BattleMove(dir, _approachSpeed * OverloadSpeedMultiplier);
-            }
             else
             {
-                // 근접 범위 — 정지 후 밀치기
                 BattleStop();
                 TryPush();
             }

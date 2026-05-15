@@ -153,7 +153,7 @@ namespace SENTRY
         //  전투 AI
         // ─────────────────────────────────────────
 
-        /// <summary>시야 확보된 가장 가까운 적을 탐색합니다.</summary>
+        /// <summary>시야 확보된 가장 가까운 생존 적을 탐색합니다.</summary>
         private void FindTarget()
         {
             Collider2D[] hits = Physics2D.OverlapCircleAll(
@@ -166,6 +166,10 @@ namespace SENTRY
 
             foreach (var col in hits)
             {
+                if (col == null) continue;
+                Enemy e = col.GetComponent<Enemy>();
+                if (e == null || e.IsDead) continue;
+
                 float d = Vector2.Distance(transform.position, col.transform.position);
                 if (d >= minDist) continue;
 
@@ -184,17 +188,13 @@ namespace SENTRY
             _currentTarget = best;
         }
 
-        /// <summary>
-        /// 교전 거리를 유지하며 기본 공격을 시도합니다.
-        ///
-        /// [페이크 쿼터뷰 대응]
-        ///   linearVelocity 직접 할당 → BattleMove() 호출로 변경.
-        ///   BattleStop() 호출로 이동 중단도 Kinematic 안전 처리.
-        /// </summary>
+        /// <summary>교전 거리를 유지하며 기본 공격을 시도합니다.</summary>
         private void HandleBattleAI()
         {
-            if (_currentTarget == null)
+            if (_currentTarget == null ||
+                !_currentTarget.gameObject.activeInHierarchy)
             {
+                _currentTarget = null;
                 BattleStop();
                 return;
             }
@@ -206,18 +206,11 @@ namespace SENTRY
             float speed = _repositionSpeed * OverloadSpeedMultiplier;
 
             if (dist < _preferredDistance * 0.7f)
-            {
-                // 너무 가까움 — 후퇴
                 BattleMove(-dir, speed);
-            }
             else if (dist > _preferredDistance * 1.3f)
-            {
-                // 너무 멀음 — 전진
                 BattleMove(dir, speed);
-            }
             else
             {
-                // 교전 거리 유지 — 정지 후 사격
                 BattleStop();
                 TryAttack();
             }
@@ -233,13 +226,14 @@ namespace SENTRY
             if (Time.time < _lastAttackTime + _attackCooldown) return;
             if (_currentTarget == null) return;
 
+            Enemy e = _currentTarget.GetComponent<Enemy>();
+            if (e == null || e.IsDead) { _currentTarget = null; return; }
+
             _lastAttackTime = Time.time;
             FireBullet(_currentTarget,
                        Mathf.RoundToInt(_attackDamage * OverloadDamageMultiplier));
 
-            // 발사 연출: 총구 방향 약한 펀치
-            Vector3 shootDir =
-                (_currentTarget.position - transform.position).normalized;
+            Vector3 shootDir = (_currentTarget.position - transform.position).normalized;
             transform.DOPunchPosition(shootDir * 0.1f, 0.1f, 5, 0.5f);
 
             ChargeSkillGauge(_skillGaugePerAttack);
