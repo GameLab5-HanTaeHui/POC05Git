@@ -196,7 +196,7 @@ MonoBehaviour:
   _wallLayer:
     serializedVersion: 2
     m_Bits: 2097152
-  _sortingOrderScale: 50
+  _sortingOrderScale: -50
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4
   _knockDuration: 0.18

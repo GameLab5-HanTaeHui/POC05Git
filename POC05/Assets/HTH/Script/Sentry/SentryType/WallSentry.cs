@@ -9,7 +9,12 @@ namespace SENTRY
     /// [버그 수정 — TilemapCollider 뚫림]
     /// TryPush(), UseSkill(), FallbackSkill() 의 DOMove 호출에
     /// BattlePhysicsHelper.GetSafeTarget()을 적용했습니다.
-    /// 밀치기 목표 위치를 CircleCast로 검증해 벽에 막히면 직전 위치로 클램핑합니다.
+    ///
+    /// [버그 수정 — Y축 승천 / 맵 뒤 뚫림]
+    /// 밀치기 방향 계산을 BattlePhysicsHelper.FlatDirection()으로 교체했습니다.
+    /// 기존 (target - from).normalized는 Y 성분이 포함되어 오브젝트가
+    /// 하늘로 승천하거나 맵 뒤로 뚫리는 문제가 있었습니다.
+    /// FlatDirection()은 Y=0으로 평탄화한 방향만 반환합니다.
     ///
     /// [Inspector 추가 필드]
     /// _wallLayer     — TilemapCollider가 있는 레이어 (보통 Ground 또는 Wall)
@@ -160,7 +165,7 @@ namespace SENTRY
 
             float dist = Vector2.Distance(transform.position, _currentTarget.position);
             Vector2 dir = ((Vector2)_currentTarget.position
-                             - (Vector2)transform.position).normalized;
+                           - (Vector2)transform.position).normalized;
 
             if (dist > 1.0f)
                 BattleMove(dir, _approachSpeed * OverloadSpeedMultiplier);
@@ -179,8 +184,10 @@ namespace SENTRY
         /// 밀치기 공격.
         ///
         /// [버그 수정 — TilemapCollider 뚫림]
-        /// DOMove 전 BattlePhysicsHelper.GetSafeTarget()으로
-        /// 밀치기 목표 위치가 벽 안으로 들어가지 않도록 클램핑합니다.
+        /// GetSafeTarget()으로 밀치기 목표 위치를 벽 직전으로 클램핑합니다.
+        ///
+        /// [버그 수정 — Y축 승천 / 맵 뒤 뚫림]
+        /// FlatDirection()으로 Y 성분을 제거한 방향만 계산합니다.
         /// </summary>
         private void TryPush()
         {
@@ -204,10 +211,10 @@ namespace SENTRY
 
             if (!enemy.IsDead && _currentTarget != null)
             {
-                Vector3 pushDir = (_currentTarget.position - transform.position).normalized;
+                // [Y축 고정] FlatDirection — Y 성분 제거하여 승천/뚫림 방지
+                Vector3 pushDir = BattlePhysicsHelper.FlatDirection(
+                    transform.position, _currentTarget.position);
                 Vector3 rawTarget = _currentTarget.position + pushDir * _pushDistance;
-
-                // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
                 Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
                     from: _currentTarget.position,
                     to: rawTarget,
@@ -219,8 +226,9 @@ namespace SENTRY
 
             if (_currentTarget != null)
             {
+                // [Y축 고정] 연출용 punch 방향도 FlatDirection 사용
                 Vector3 punchDir =
-                    (_currentTarget.position - transform.position).normalized * 0.4f;
+                    BattlePhysicsHelper.FlatDirection(transform.position, _currentTarget.position) * 0.4f;
                 transform.DOPunchPosition(punchDir, 0.2f, 5, 0.5f);
             }
 
@@ -251,13 +259,12 @@ namespace SENTRY
         /// <summary>
         /// 스킬 게이지 만참 시 강한 밀치기 + 기절을 발동합니다.
         ///
-        /// [버그 수정 — TilemapCollider 뚫림]
-        /// onImpact 콜백 내 DOMove에 BattlePhysicsHelper.GetSafeTarget() 적용.
+        /// [버그 수정 — Y축 승천 / 맵 뒤 뚫림]
+        /// onImpact 콜백 내 방향 계산을 FlatDirection()으로 교체했습니다.
         /// </summary>
         private void UseSkill()
         {
             if (_currentTarget == null) return;
-
             if (_skillEffect == null) { FallbackSkill(); return; }
 
             int skillDmg = Mathf.RoundToInt(
@@ -265,6 +272,7 @@ namespace SENTRY
             float pushDist = _pushDistance * _skillPushDistMultiplier;
             float stunDur = _stunDuration;
             Transform captured = _currentTarget;
+            Vector3 selfPos = transform.position; // 콜백 시점에 transform이 null일 수 있으므로 캡처
 
             _skillEffect.PlaySkill(
                 captured,
@@ -274,15 +282,14 @@ namespace SENTRY
                     Enemy e = captured.GetComponent<Enemy>();
                     if (e == null) return;
 
-                    e.TakeDamage(skillDmg, HitType.Strike, transform.position);
+                    e.TakeDamage(skillDmg, HitType.Strike, selfPos);
                     e.Stun(stunDur);
 
                     if (!e.IsDead && captured != null)
                     {
-                        Vector3 pushDir = (captured.position - transform.position).normalized;
+                        // [Y축 고정] FlatDirection — Y 성분 제거
+                        Vector3 pushDir = BattlePhysicsHelper.FlatDirection(selfPos, captured.position);
                         Vector3 rawTarget = captured.position + pushDir * pushDist;
-
-                        // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
                         Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
                             from: captured.position,
                             to: rawTarget,
@@ -300,8 +307,8 @@ namespace SENTRY
         /// <summary>
         /// SkillEffect_Wall 컴포넌트가 없을 때 즉시 스킬을 처리합니다.
         ///
-        /// [버그 수정 — TilemapCollider 뚫림]
-        /// DOMove에 BattlePhysicsHelper.GetSafeTarget() 적용.
+        /// [버그 수정 — Y축 승천 / 맵 뒤 뚫림]
+        /// 방향 계산을 FlatDirection()으로 교체했습니다.
         /// </summary>
         private void FallbackSkill()
         {
@@ -317,11 +324,11 @@ namespace SENTRY
 
             if (!e.IsDead)
             {
-                Vector3 pushDir = (_currentTarget.position - transform.position).normalized;
+                // [Y축 고정] FlatDirection — Y 성분 제거
+                Vector3 pushDir = BattlePhysicsHelper.FlatDirection(
+                    transform.position, _currentTarget.position);
                 Vector3 rawTarget = _currentTarget.position
-                                    + pushDir * _pushDistance * _skillPushDistMultiplier;
-
-                // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
+                                     + pushDir * _pushDistance * _skillPushDistMultiplier;
                 Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
                     from: _currentTarget.position,
                     to: rawTarget,

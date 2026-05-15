@@ -3,70 +3,94 @@
 namespace SENTRY
 {
     /// <summary>
-    /// 배틀 필드에서 DOMove 기반 넉백/밀치기가 TilemapCollider를 뚫는 버그를 방지하는 유틸리티.
+    /// 배틀 필드(페이크 쿼터뷰)에서 DOMove 기반 이동의 두 가지 버그를 방지합니다.
     ///
-    /// [문제 원인]
-    /// DOMove는 Transform을 직접 조작하므로 물리 엔진(Collider)을 완전히 무시합니다.
-    /// Kinematic Rigidbody2D 상태에서도 TilemapCollider2D를 그냥 통과합니다.
+    /// [버그 1 — TilemapCollider 뚫림]
+    ///   DOMove는 Transform을 직접 조작하므로 Kinematic Rigidbody2D의 물리 충돌을 무시합니다.
+    ///   → CircleCast로 이동 경로를 검사해 벽 직전 위치로 클램핑합니다.
     ///
-    /// [해결 방식]
-    /// DOMove 호출 전에 CircleCast로 이동 경로 상의 충돌을 검사합니다.
-    /// 충돌이 감지되면 벽에 닿기 직전 위치로 목표를 클램핑합니다.
-    /// DOMove는 보정된 안전한 위치로만 이동합니다.
+    /// [버그 2 — Y축 승천 / 맵 뒤 뚫림]
+    ///   페이크 쿼터뷰에서 Y축 = 깊이(원근감)입니다.
+    ///   밀치기/넉백 방향 벡터에 Y 성분이 포함되면 오브젝트가 하늘로 승천하거나
+    ///   맵 뒤쪽으로 뚫려 들어갑니다.
+    ///   → 모든 이동 계산을 X축 방향만 사용하고, Y값은 출발지 기준으로 고정합니다.
     ///
-    /// [사용법]
-    /// Vector3 safe = BattlePhysicsHelper.GetSafeTarget(
-    ///     from:      transform.position,
-    ///     to:        knockTarget,
-    ///     radius:    0.4f,
-    ///     wallLayer: _wallLayer);
+    /// [GetSafeTarget 동작]
+    ///   1. to의 Y값을 from의 Y값으로 고정 (Y축 이동 방지)
+    ///   2. X축 방향으로만 CircleCast 발사
+    ///   3. 충돌 없으면 Y 고정된 to 반환
+    ///   4. 충돌 있으면 X축 벽 직전 위치 + from의 Y 반환
     ///
-    /// transform.DOMove(safe, duration).SetEase(Ease.OutQuart);
-    ///
-    /// [Inspector 설정]
-    /// wallLayer에 BattleField TilemapCollider 오브젝트가 속한 레이어를 설정하세요.
-    /// 보통 "Ground" 또는 "Wall" 레이어입니다.
+    /// [FlatDirection 동작]
+    ///   두 Vector3 사이의 방향을 Y=0으로 평탄화한 normalized 벡터를 반환합니다.
+    ///   밀치기/넉백 방향 계산 시 반드시 이 메서드를 사용하세요.
     /// </summary>
     public static class BattlePhysicsHelper
     {
         /// <summary>
-        /// 넉백/밀치기 목표 위치를 CircleCast로 검증해 벽에 막히면 안전한 위치로 보정합니다.
+        /// Y축을 고정한 채로 목표 위치를 CircleCast로 검증해 안전한 위치를 반환합니다.
         ///
-        /// [동작 원리]
-        ///   1. 현재 위치(from)에서 목표(to) 방향으로 CircleCast 발사
-        ///   2. 이동 거리 내에 충돌이 없으면 원래 목표 반환
-        ///   3. 충돌이 있으면 벽 직전 안전한 위치 반환
+        /// [핵심]
+        ///   페이크 쿼터뷰에서 Y축은 깊이(원근감)입니다.
+        ///   이동 중 Y가 바뀌면 오브젝트가 하늘/땅으로 이동합니다.
+        ///   이 메서드는 to의 Y를 from의 Y로 강제 고정한 뒤 X 방향으로만 충돌을 검사합니다.
         /// </summary>
-        /// <param name="from">이동 시작 위치 (현재 위치)</param>
-        /// <param name="to">이동 목표 위치 (넉백/밀치기 목표)</param>
-        /// <param name="radius">캐릭터 콜라이더 반경 (CircleCast 크기)</param>
-        /// <param name="wallLayer">충돌 검사할 레이어 (TilemapCollider 포함)</param>
-        /// <returns>벽에 막히지 않는 안전한 목표 위치</returns>
+        /// <param name="from">이동 시작 위치 (오브젝트 현재 위치)</param>
+        /// <param name="to">이동 목표 위치 (넉백/밀치기 원본 목표)</param>
+        /// <param name="radius">오브젝트 콜라이더 반경 (CircleCast 크기)</param>
+        /// <param name="wallLayer">벽 레이어마스크 (TilemapCollider 포함)</param>
+        /// <returns>Y축 고정 + 벽 충돌 보정된 안전한 목표 위치</returns>
         public static Vector3 GetSafeTarget(
             Vector3 from,
             Vector3 to,
             float radius,
             LayerMask wallLayer)
         {
-            Vector2 origin = from;
-            Vector2 dir = ((Vector2)to - (Vector2)from).normalized;
-            float distance = Vector2.Distance(from, to);
+            // ── Step 1: Y축 고정 ──
+            // to의 Y를 from의 Y로 강제 고정합니다.
+            // 페이크 쿼터뷰에서 Y는 깊이이므로 밀치기/넉백에서 Y가 바뀌면 안 됩니다.
+            Vector3 flatTo = new Vector3(to.x, from.y, to.z);
 
-            if (distance <= 0f) return from;
+            // ── Step 2: X축 방향으로만 CircleCast ──
+            Vector2 origin = new Vector2(from.x, from.y);
+            Vector2 direction = new Vector2(flatTo.x - from.x, flatTo.y - from.y);
+            float distance = direction.magnitude;
+
+            if (distance <= 0.001f) return flatTo;
 
             RaycastHit2D hit = Physics2D.CircleCast(
                 origin: origin,
                 radius: radius,
-                direction: dir,
+                direction: direction.normalized,
                 distance: distance,
                 layerMask: wallLayer);
 
+            // ── Step 3: 충돌 없으면 Y 고정된 목표 그대로 반환 ──
             if (hit.collider == null)
-                return to; // 충돌 없음 — 원래 목표 그대로
+                return flatTo;
 
-            // 충돌 지점 직전으로 클램핑 (반경 + 여유 0.05 유지)
+            // ── Step 4: 충돌 있으면 벽 직전 위치 + from의 Y 반환 ──
             float safeDistance = Mathf.Max(0f, hit.distance - radius - 0.05f);
-            return from + (Vector3)(dir * safeDistance);
+            Vector2 safeXY = origin + direction.normalized * safeDistance;
+
+            return new Vector3(safeXY.x, from.y, from.z);
+        }
+
+        /// <summary>
+        /// 두 위치 사이의 방향 벡터를 Y=0으로 평탄화한 뒤 정규화해 반환합니다.
+        ///
+        /// 밀치기/넉백 방향 계산 시 반드시 이 메서드를 사용하세요.
+        /// 일반 (to - from).normalized는 Y 성분이 포함되어 승천/뚫림이 발생합니다.
+        ///
+        /// 사용 예시:
+        ///   Vector3 pushDir = BattlePhysicsHelper.FlatDirection(from, to);
+        ///   Vector3 rawTarget = from + pushDir * pushDistance;
+        ///   Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(from, rawTarget, radius, wallLayer);
+        /// </summary>
+        public static Vector3 FlatDirection(Vector3 from, Vector3 to)
+        {
+            Vector3 dir = new Vector3(to.x - from.x, 0f, to.z - from.z);
+            return dir.sqrMagnitude > 0.0001f ? dir.normalized : Vector3.right;
         }
     }
 }

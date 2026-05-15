@@ -105,7 +105,6 @@ namespace SENTRY
         private bool _shouldMove = false;
         private Rigidbody2D _rigid2D;
         private SpriteRenderer _spriteRenderer;
-        private Color _originColor;
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
@@ -167,7 +166,6 @@ namespace SENTRY
         private void Start()
         {
             _currentHp = _maxHp;
-            _originColor = _spriteRenderer.color;
         }
 
         private void Update()
@@ -323,7 +321,7 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = _originColor;
+                            _spriteRenderer.color = Color.white;
                     });
 
             // ── 넉백 — BattlePhysicsHelper로 벽 충돌 보정 후 DOMove ──
@@ -374,7 +372,7 @@ namespace SENTRY
             _isStunned = false;
 
             if (_spriteRenderer != null && !_isDead)
-                _spriteRenderer.DOColor(_originColor, 0.15f);
+                _spriteRenderer.DOColor(Color.white, 0.15f);
 
             Debug.Log($"[{name}] 기절 해제");
         }
