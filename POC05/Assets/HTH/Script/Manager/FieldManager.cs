@@ -8,26 +8,22 @@ namespace SENTRY
     /// <summary>
     /// 탐색 필드(2D 사이드뷰) ↔ 배틀 필드(2.5D 쿼터뷰) 전환을 관리하는 싱글턴 매니저.
     ///
-    /// [타이밍 문제 수정]
+    /// [새로운 배틀 진입 흐름]
     ///
-    /// ▶ 수정 전 문제
-    ///   BattleTrigger가 FieldManager.EnterBattle()과 BattleManager.StartBattle()을
-    ///   동시에 호출 → 전투가 페이드 인 도중에 시작됨
-    ///   PlayerController가 살아있어 전환 중 이동 모습이 보임
-    ///
-    /// ▶ 수정 후 구조
-    ///   BattleTrigger → FieldManager.EnterBattle(player, encounterData) 만 호출
-    ///   FieldManager  → 페이드 인 완전히 끝난 후 BattleManager.StartBattle() 호출
-    ///   페이드 아웃 직전 PlayerController 비활성화 → 페이드 인 후 재활성화
-    ///
-    /// [EnterBattleRoutine 순서]
-    ///   1. PlayerController 비활성화
-    ///   2. 페이드 아웃
-    ///   3. 블랙아웃 중: 오브젝트 전환 + 카메라 + 플레이어 순간이동
-    ///   4. 블랙아웃 유지 (_blackoutHoldDuration)
-    ///   5. HUD 슬라이드 인
-    ///   6. 페이드 인 ← 이 시점부터 화면 보임
-    ///   7. BattleManager.StartBattle() ← 화면이 완전히 밝아진 후 전투 시작
+    ///   EnterBattleSequence()
+    ///     1. PlayerController 비활성화
+    ///     2. 페이드 아웃 (FadeTo 1) — 검은화면 완료까지 대기
+    ///     3. 블랙아웃 중:
+    ///        - ExplorationFieldRoot OFF / BattleFieldRoot ON
+    ///        - 카메라 쿼터뷰 전환
+    ///        - 플레이어 → BattlePlayerSpawnPoint 순간이동
+    ///        - 센트리 → 하늘 위 대기 위치로 순간이동
+    ///     4. 페이드 인 (FadeTo 0) — 화면 밝아짐
+    ///     5. 센트리 낙하 DOMove 연출 (순서대로, 완료 대기)
+    ///     6. 적 소환 낙하 연출 (EnemySpawner.SpawnWithDropEffect)
+    ///     7. 낙하 완료 → BattleUIManager.ShowEncounterPanel() 선택창 표시
+    ///        - [전투하기] → 3초 카운트다운 → BattleManager.StartBattle()
+    ///        - [도망가기] → ReturnToField() → 탐색 필드 복귀
     /// </summary>
     public class FieldManager : MonoBehaviour
     {
@@ -48,22 +44,33 @@ namespace SENTRY
         [SerializeField] private int _battleCamPriority = 20;
 
         [Header("배틀 필드 플레이어 위치")]
+        [Tooltip("배틀 중 플레이어가 이동할 관전 위치")]
         [SerializeField] private Transform _battlePlayerSpawnPoint;
 
+        [Header("센트리 배틀 배치 위치")]
+        [Tooltip("[0]=Strike / [1]=Shoot / [2]=Wall\n배틀 시작 시 센트리가 이 위치 위에서 낙하합니다.")]
+        [SerializeField] private Transform[] _sentryBattleSpawnPoints;
+
+        [Tooltip("센트리가 낙하를 시작하는 하늘 위 높이 오프셋 (Y축)")]
+        [SerializeField] private float _sentryDropHeight = 8f;
+
+        [Tooltip("센트리 낙하 소요 시간 (초)")]
+        [SerializeField] private float _sentryDropDuration = 0.6f;
+
+        [Tooltip("센트리 낙하 사이 간격 (초)")]
+        [SerializeField] private float _sentryDropStagger = 0.2f;
+
         [Header("전환 연출")]
-        [Tooltip("페이드 인/아웃 소요 시간 (초)")]
         [SerializeField] private float _fadeDuration = 0.5f;
-
-        [Tooltip("블랙아웃 유지 시간 (초). 기본값 0.8초\n" +
-                 "카메라 블렌드 + 오브젝트 전환이 이 시간 내에 완료됩니다.")]
-        [SerializeField] private float _blackoutHoldDuration = 0.8f;
-
-        [Tooltip("페이드 패널 CanvasGroup")]
+        [SerializeField] private float _blackoutHoldDuration = 0.6f;
         [SerializeField] private CanvasGroup _fadePanel;
 
+        [Header("카운트다운 설정")]
+        [Tooltip("전투 시작 전 카운트다운 시간 (초)")]
+        [SerializeField] private float _countdownDuration = 3f;
+
         [Header("플레이어 컨트롤러")]
-        [Tooltip("전환 중 입력 차단을 위해 비활성화할 PlayerController.\n" +
-                 "미연결 시 Start()에서 Player 태그로 자동 탐색합니다.")]
+        [Tooltip("미연결 시 Start()에서 Player 태그로 자동 탐색합니다.")]
         [SerializeField] private PlayerController _playerController;
 
         // ─────────────────────────────────────────
@@ -75,16 +82,20 @@ namespace SENTRY
         private Vector3 _savedPlayerPosition;
         private Vector3[] _savedSentryPositions = new Vector3[3];
 
-        /// <summary>페이드 인 완료 후 StartBattle()에 전달할 인카운터 데이터</summary>
+        /// <summary>현재 배틀 시퀀스에서 사용 중인 인카운터 데이터</summary>
         private BattleEncounterDataSO _pendingEncounterData;
+
+        /// <summary>현재 배틀을 시작한 BattleTrigger (도망 시 콜백용)</summary>
+        private BattleTrigger _currentTrigger;
+
+        /// <summary>현재 배틀 필드의 센트리 Transform 캐시</summary>
+        private Transform[] _sentryCached = new Transform[3];
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
         public bool IsInBattle => _isInBattle;
-        public Vector3 SavedPlayerPosition => _savedPlayerPosition;
-        public Vector3[] SavedSentryPositions => _savedSentryPositions;
 
         // ─────────────────────────────────────────
         //  유니티 생명주기
@@ -103,7 +114,7 @@ namespace SENTRY
 
         private void Start()
         {
-            GameObject pObj = GameObject.FindGameObjectWithTag("Player");
+            var pObj = GameObject.FindGameObjectWithTag("Player");
             if (pObj != null)
             {
                 _playerTransform = pObj.transform;
@@ -113,7 +124,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  카메라 전환 헬퍼
+        //  카메라 전환
         // ─────────────────────────────────────────
 
         private void SetCameraToExploration()
@@ -132,10 +143,6 @@ namespace SENTRY
         //  위치 저장
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// 배틀 트리거 접촉 시점의 위치를 저장합니다.
-        /// BattleTrigger.TriggerBattle()에서 EnterBattle() 직전에 호출합니다.
-        /// </summary>
         public void SaveReturnPositions(
             Transform player,
             Transform strike, Transform shoot, Transform wall)
@@ -147,74 +154,221 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  배틀 필드 진입
+        //  배틀 진입 시퀀스 (새로운 흐름)
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 탐색 필드 → 배틀 필드로 전환합니다.
-        ///
-        /// [변경] BattleTrigger에서 BattleManager.StartBattle()을 직접 호출하지 않습니다.
-        ///        대신 encounterData를 파라미터로 받아 저장하고,
-        ///        페이드 인이 완전히 끝난 후 FieldManager가 직접 StartBattle()을 호출합니다.
+        /// BattleTrigger.OnTriggerEnter2D에서 호출합니다.
+        /// 모든 배틀 진입 연출과 선택창을 이 메서드가 전담합니다.
         /// </summary>
-        /// <param name="player">플레이어 Transform</param>
-        /// <param name="encounterData">배틀에 사용할 인카운터 구성 SO</param>
-        public void EnterBattle(Transform player, BattleEncounterDataSO encounterData)
+        public void EnterBattleSequence(
+            Transform player,
+            BattleEncounterDataSO encounterData,
+            Transform strike, Transform shoot, Transform wall)
         {
             if (_isInBattle) return;
+
             _playerTransform = player;
             _pendingEncounterData = encounterData;
             _isInBattle = true;
-            StartCoroutine(EnterBattleRoutine());
+            _sentryCached[0] = strike;
+            _sentryCached[1] = shoot;
+            _sentryCached[2] = wall;
+
+            StartCoroutine(BattleSequenceRoutine());
         }
 
-        private IEnumerator EnterBattleRoutine()
+        private IEnumerator BattleSequenceRoutine()
         {
-            // ── 1. 플레이어 컨트롤러 비활성화 ──
-            // 전환 중 이동 입력이 들어오지 않게 합니다.
+            // ── 1. 플레이어 입력 차단 ──
             SetPlayerControllerActive(false);
 
-            // ── 2. 페이드 아웃 ──
+            // ── 2. 페이드 아웃 — 검은화면 완전히 될 때까지 대기 ──
             yield return FadeTo(1f);
 
-            // ── 3. 블랙아웃 중 전환 (화면이 검으므로 보이지 않음) ──
+            // ── 3. 블랙아웃 중 전환 ──
             if (_explorationFieldRoot != null) _explorationFieldRoot.SetActive(false);
             if (_battleFieldRoot != null) _battleFieldRoot.SetActive(true);
 
-            // 카메라 Priority 즉시 전환
             SetCameraToBattle();
 
-            // 플레이어 관전 위치로 순간이동
+            // 플레이어 순간이동
             if (_playerTransform != null && _battlePlayerSpawnPoint != null)
                 _playerTransform.position = _battlePlayerSpawnPoint.position;
 
-            // ── 4. 블랙아웃 유지 ──
-            // Cinemachine 블렌드가 완료될 때까지 대기합니다.
+            // 센트리 → 스폰 위치 위 하늘로 순간이동 (낙하 준비)
+            // SetupForBattle은 여기서 호출 — _isInBattleField = true (Y 보정 시작)
+            SetupSentriesForDrop();
+
+            // 블랙아웃 유지 (카메라 블렌드 완료 대기)
             yield return new WaitForSeconds(_blackoutHoldDuration);
 
-            // ── 5. HUD 슬라이드 인 ──
+            // ── 4. 페이드 인 — 화면 밝아짐 ──
+            // 이 시점부터 플레이어는 배틀 필드를 보게 됩니다.
             BattleUIManager.Instance?.SetBattleHudActive(true);
-
-            // ── 6. 페이드 인 ──
             yield return FadeTo(0f);
 
-            // ── 7. 전투 시작 ──
-            // 페이드 인이 완전히 끝난 후에 전투가 시작됩니다.
-            // 센트리 등장 DOMove와 적 소환이 화면이 밝아진 상태에서 진행됩니다.
-            if (BattleManager.Instance != null && _pendingEncounterData != null)
-                BattleManager.Instance.StartBattle(_playerTransform, _pendingEncounterData);
+            // ── 5. 센트리 낙하 연출 ──
+            yield return DropSentriesRoutine();
 
-            Debug.Log("[FieldManager] 배틀 필드 전환 완료 — 전투 시작");
+            // ── 6. 적 소환 낙하 연출 ──
+            var spawner = FindFirstObjectByType<EnemySpawner>();
+            if (spawner != null)
+                yield return spawner.SpawnWithDropEffect(_pendingEncounterData);
+
+            // ── 7. 선택창 표시 (배틀 필드에서) ──
+            BattleUIManager.Instance?.ShowEncounterPanel(_pendingEncounterData, null);
+
+            // 이후 흐름:
+            // [전투하기] → OnFightChosen() → CountdownAndStart()
+            // [도망가기] → OnFleeChosen()  → ReturnToField()
         }
 
         // ─────────────────────────────────────────
-        //  탐색 필드 복귀
+        //  센트리 낙하 준비
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 배틀 필드 → 탐색 필드로 복귀합니다.
-        /// BattleManager.ReturnToFieldFromResult()에서 호출합니다.
+        /// 센트리를 배틀 스폰 위치 위 하늘에 배치합니다.
+        /// 페이드 아웃 중(화면이 검을 때) 실행됩니다.
         /// </summary>
+        private void SetupSentriesForDrop()
+        {
+            if (_sentryBattleSpawnPoints == null) return;
+
+            for (int i = 0; i < 3; i++)
+            {
+                if (_sentryCached[i] == null) continue;
+                if (i >= _sentryBattleSpawnPoints.Length) continue;
+
+                // 배틀 물리 전환 (중력 OFF + Kinematic)
+                SentryBase sentry = _sentryCached[i].GetComponent<SentryBase>();
+                sentry?.SetupForBattle(_playerTransform);
+                sentry?.EnterBattlePhysics();
+
+                // 스폰 위치 위 하늘로 순간이동
+                Vector3 dropStart = _sentryBattleSpawnPoints[i].position
+                                    + Vector3.up * _sentryDropHeight;
+                _sentryCached[i].position = dropStart;
+            }
+        }
+
+        // ─────────────────────────────────────────
+        //  센트리 낙하 연출
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// 센트리를 순서대로 스폰 위치로 낙하시킵니다.
+        /// Strike → Shoot → Wall 순서로 _sentryDropStagger 간격을 두고 낙하합니다.
+        /// 마지막 센트리 착지까지 대기 후 반환합니다.
+        /// </summary>
+        private IEnumerator DropSentriesRoutine()
+        {
+            if (_sentryBattleSpawnPoints == null) yield break;
+
+            float lastDropTime = 0f;
+
+            for (int i = 0; i < 3; i++)
+            {
+                if (_sentryCached[i] == null) continue;
+                if (i >= _sentryBattleSpawnPoints.Length) continue;
+
+                Vector3 landPos = _sentryBattleSpawnPoints[i].position;
+
+                // 순서대로 낙하 시작 (stagger 간격)
+                _sentryCached[i]
+                    .DOMove(landPos, _sentryDropDuration)
+                    .SetEase(Ease.InQuad)
+                    .SetDelay(i * _sentryDropStagger);
+
+                lastDropTime = _sentryDropDuration + i * _sentryDropStagger;
+
+                // 착지 시 충격 연출 (Punch)
+                _sentryCached[i].DOPunchScale(
+                    new Vector3(0.3f, -0.3f, 0f),
+                    0.3f, 5, 0.5f)
+                    .SetDelay(lastDropTime);
+            }
+
+            // 마지막 센트리 착지 완료까지 대기
+            yield return new WaitForSeconds(lastDropTime + 0.3f);
+        }
+
+        // ─────────────────────────────────────────
+        //  선택창 결과 콜백
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// [전투하기] 버튼 클릭 시 BattleUIManager가 호출합니다.
+        /// 3초 카운트다운 후 전투를 시작합니다.
+        /// </summary>
+        public void OnFightChosen()
+        {
+            StartCoroutine(CountdownAndStartBattle());
+        }
+
+        private IEnumerator CountdownAndStartBattle()
+        {
+            // 카운트다운 UI 표시 (BattleUIManager가 전담)
+            yield return BattleUIManager.Instance?.PlayCountdown(_countdownDuration);
+
+            // 전투 시작
+            if (BattleManager.Instance != null && _pendingEncounterData != null)
+                BattleManager.Instance.StartBattle(_playerTransform, _pendingEncounterData);
+
+            Debug.Log("[FieldManager] 배틀 시작!");
+        }
+
+        /// <summary>
+        /// [도망가기] 버튼 클릭 시 BattleUIManager가 호출합니다.
+        /// 탐색 필드로 복귀합니다.
+        /// </summary>
+        public void OnFleeChosen()
+        {
+            StartCoroutine(FleeRoutine());
+        }
+
+        private IEnumerator FleeRoutine()
+        {
+            BattleUIManager.Instance?.HideEncounterPanel();
+            BattleUIManager.Instance?.SetBattleHudActive(false);
+
+            yield return FadeTo(1f);
+
+            // 배틀 필드 → 탐색 필드 전환
+            if (_battleFieldRoot != null) _battleFieldRoot.SetActive(false);
+            if (_explorationFieldRoot != null) _explorationFieldRoot.SetActive(true);
+            SetCameraToExploration();
+
+            // 위치 복귀
+            if (_playerTransform != null) _playerTransform.position = _savedPlayerPosition;
+            for (int i = 0; i < 3; i++)
+            {
+                if (_sentryCached[i] != null)
+                    _sentryCached[i].position = _savedSentryPositions[i];
+            }
+
+            // 센트리 물리 복원
+            for (int i = 0; i < 3; i++)
+            {
+                SentryBase s = _sentryCached[i]?.GetComponent<SentryBase>();
+                s?.ExitBattlePhysics();
+                s?.StartFollowing();
+            }
+
+            yield return new WaitForSeconds(_blackoutHoldDuration);
+            yield return FadeTo(0f);
+
+            _isInBattle = false;
+            SetPlayerControllerActive(true);
+
+            Debug.Log("[FieldManager] 도망 — 탐색 필드 복귀 완료");
+        }
+
+        // ─────────────────────────────────────────
+        //  탐색 필드 복귀 (전투 종료 후)
+        // ─────────────────────────────────────────
+
         public void ReturnToField(
             Transform strike, Transform shoot, Transform wall)
         {
@@ -226,13 +380,10 @@ namespace SENTRY
         private IEnumerator ReturnToFieldRoutine(
             Transform strike, Transform shoot, Transform wall)
         {
-            // HUD 슬라이드 아웃
             BattleUIManager.Instance?.SetBattleHudActive(false);
 
-            // 1. 페이드 아웃
             yield return FadeTo(1f);
 
-            // 2. 블랙아웃 중 전환
             if (_battleFieldRoot != null) _battleFieldRoot.SetActive(false);
             if (_explorationFieldRoot != null) _explorationFieldRoot.SetActive(true);
             SetCameraToExploration();
@@ -242,34 +393,23 @@ namespace SENTRY
             if (shoot != null) shoot.position = _savedSentryPositions[1];
             if (wall != null) wall.position = _savedSentryPositions[2];
 
-            // 3. 블랙아웃 유지
             yield return new WaitForSeconds(_blackoutHoldDuration);
-
-            // 4. 페이드 인
             yield return FadeTo(0f);
 
-            // 5. 플레이어 컨트롤러 재활성화
             SetPlayerControllerActive(true);
 
-            Debug.Log("[FieldManager] 탐색 필드 복귀 완료");
+            Debug.Log("[FieldManager] 전투 종료 — 탐색 필드 복귀 완료");
         }
 
         // ─────────────────────────────────────────
-        //  플레이어 컨트롤러 제어 헬퍼
+        //  헬퍼
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// 전환 중 플레이어 입력을 막기 위해 PlayerController를 활성/비활성화합니다.
-        /// </summary>
         private void SetPlayerControllerActive(bool active)
         {
             if (_playerController != null)
                 _playerController.enabled = active;
         }
-
-        // ─────────────────────────────────────────
-        //  페이드 헬퍼
-        // ─────────────────────────────────────────
 
         private IEnumerator FadeTo(float targetAlpha)
         {

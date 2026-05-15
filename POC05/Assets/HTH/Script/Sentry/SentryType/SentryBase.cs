@@ -101,6 +101,14 @@ namespace SENTRY
         private float _savedGravityScale = 1f;
         private bool _isBattlePhysics = false;
 
+        /// <summary>
+        /// 배틀 필드 활성 여부.
+        /// true이면 SortingOrder를 Y 위치 기반으로 매 프레임 갱신합니다.
+        /// EnterBattlePhysics()보다 먼저 SetupForBattle()에서 true로 세팅되어
+        /// DOMove 등장 연출 중에도 정렬이 적용됩니다.
+        /// </summary>
+        private bool _isInBattleField = false;
+
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
@@ -142,7 +150,10 @@ namespace SENTRY
             if (!IsKnockedOut && _playerTransform != null && _isFollowing)
                 FollowPlayer();
 
-            if (_isBattlePhysics && _spriteRenderer != null)
+            // 배틀 필드에 있는 동안 Y 위치 기반 SortingOrder 갱신
+            // _isInBattleField은 SetupForBattle()에서 true가 되므로
+            // EnterBattlePhysics() 이전 DOMove 등장 연출 중에도 정렬이 적용됩니다.
+            if (_isInBattleField && _spriteRenderer != null)
                 _spriteRenderer.sortingOrder =
                     Mathf.RoundToInt(-transform.position.y * _sortingOrderScale);
         }
@@ -177,11 +188,13 @@ namespace SENTRY
             IsOverloaded = false;
             _isInvincible = false;
             _isBattlePhysics = false;
+            _isInBattleField = true;   // Y 보정 시작 — DOMove 등장 연출 중에도 적용
             if (_rb == null)
             {
                 _rb = GetComponent<Rigidbody2D>();
                 if (_rb != null) _savedGravityScale = _rb.gravityScale;
             }
+            SetLayer(LAYER_LIVE);
             Debug.Log($"[{_sentryName}] 배틀 준비 — Lv.{_currentLevel} " +
                       $"HP:{_currentHp}/{_maxHp} EXP:{_currentExp}");
         }
@@ -253,6 +266,7 @@ namespace SENTRY
             _rb.bodyType = RigidbodyType2D.Dynamic;
             _rb.gravityScale = _savedGravityScale;
             _isBattlePhysics = false;
+            _isInBattleField = false;
             if (_spriteRenderer != null) _spriteRenderer.sortingOrder = 0;
         }
 

@@ -6,20 +6,28 @@ using DG.Tweening;
 namespace SENTRY
 {
     /// <summary>
-    /// 배틀 필드 전투 전체를 조율하는 싱글턴 매니저.
+    /// 배틀 필드 전투를 조율하는 싱글턴 매니저.
     ///
-    /// [변경 사항]
-    /// - 패배 조건: 모든 센트리 KO → UIManager.ShowDefeatPanel()
-    /// - 승리 조건: 킬 카운트 달성 → UIManager.ShowVictoryPanel(결산 데이터)
-    /// - ReturnToField()는 결산창 / 패배 패널의 버튼 클릭 후 실행됩니다.
-    /// - GameManager 의존성 제거 (배틀 단위 패배 처리)
+    /// [새로운 진입 흐름에서의 역할]
+    ///
+    ///   FieldManager.BattleSequenceRoutine()이 낙하 연출과 선택창을 담당합니다.
+    ///   [전투하기] 선택 → FieldManager.OnFightChosen() → 카운트다운
+    ///   → BattleManager.StartBattle() 호출 (이 클래스)
+    ///
+    ///   BattleManager는 전투 진행(AI 활성화, 킬카운트, 승패 판정)만 담당합니다.
+    ///   센트리 낙하 연출, 적 낙하 소환은 FieldManager / EnemySpawner가 담당합니다.
+    ///
+    /// [StartBattle() 역할]
+    ///   센트리는 이미 낙하 완료 상태이므로 DOMove 등장 연출 없이
+    ///   SetupForBattle() → EnterBattle(AI 활성) → SpawnStart(순환 소환)만 실행합니다.
     /// </summary>
     public class BattleManager : MonoBehaviour
     {
         public static BattleManager Instance { get; private set; }
 
-        [Header("배틀 설정")]
-        [SerializeField] private float _battleStartDelay = 1.5f;
+        // ─────────────────────────────────────────
+        //  Inspector 노출 필드
+        // ─────────────────────────────────────────
 
         [Header("센트리 참조")]
         [SerializeField] private StrikeSentry _strikeSentry;
@@ -29,12 +37,9 @@ namespace SENTRY
         [Header("스포너 참조")]
         [SerializeField] private EnemySpawner _enemySpawner;
 
-        [Header("배틀 진입 포지션")]
-        [Tooltip("[0]=Strike / [1]=Shoot / [2]=Wall")]
-        [SerializeField] private Transform[] _sentryBattleStartPositions;
-
-        [Tooltip("배틀 중 플레이어 관전 위치")]
-        [SerializeField] private Transform _playerBattlePosition;
+        // ─────────────────────────────────────────
+        //  내부 상태 변수
+        // ─────────────────────────────────────────
 
         private bool _isInBattle = false;
         private int _currentKillCount = 0;
@@ -43,9 +48,17 @@ namespace SENTRY
         private BattleEncounterDataSO _currentEncounterData;
         private Dictionary<string, int> _expGainedThisBattle = new();
 
+        // ─────────────────────────────────────────
+        //  외부 공개 프로퍼티
+        // ─────────────────────────────────────────
+
         public bool IsInBattle => _isInBattle;
         public int KillCount => _currentKillCount;
         public int KillTarget => _killCountToWin;
+
+        // ─────────────────────────────────────────
+        //  유니티 생명주기
+        // ─────────────────────────────────────────
 
         private void Awake()
         {
@@ -57,6 +70,12 @@ namespace SENTRY
         //  배틀 시작
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// [전투하기] 선택 → FieldManager.CountdownAndStartBattle() → 이 메서드 호출.
+        ///
+        /// 센트리와 적은 이미 낙하 완료 상태이므로
+        /// DOMove 등장 연출 없이 AI 활성화 → 지속 소환 시작 순서로 진행합니다.
+        /// </summary>
         public void StartBattle(Transform player, BattleEncounterDataSO encounterData)
         {
             if (_isInBattle) return;
@@ -76,7 +95,8 @@ namespace SENTRY
             SentryComboManager.Instance?.OnBattleStart();
 
             Debug.Log($"<color=cyan>[BattleManager] 배틀 시작! " +
-                      $"인카운터: {encounterData.encounterName} / 목표: {_killCountToWin}</color>");
+                      $"인카운터: {encounterData.encounterName} " +
+                      $"/ 목표: {_killCountToWin}</color>");
 
             StartCoroutine(BattleStartRoutine());
         }
@@ -84,63 +104,31 @@ namespace SENTRY
         private IEnumerator BattleStartRoutine()
         {
             // ① 배틀 상태 초기화 (레벨·EXP·HP 유지)
+            // 센트리는 FieldManager.SetupSentriesForDrop()에서 이미 SetupForBattle() 완료
+            // 여기서는 전투 플래그 갱신만 수행
             if (_strikeSentry != null) _strikeSentry.SetupForBattle(_playerTransform);
             if (_shootSentry != null) _shootSentry.SetupForBattle(_playerTransform);
             if (_wallSentry != null) _wallSentry.SetupForBattle(_playerTransform);
 
-            // ② 물리 전환 + 스폰 위치 이동
-            PlaceSentriesAtBattleStart();
-
-            // ③ 등장 연출 대기
-            yield return new WaitForSeconds(_battleStartDelay);
-
-            // ④ 생존 센트리 AI 활성화
+            // ② 센트리 AI 활성화 (이미 낙하 완료 위치에 있음)
             if (_strikeSentry != null && !_strikeSentry.IsKnockedOut) _strikeSentry.EnterBattle();
             if (_shootSentry != null && !_shootSentry.IsKnockedOut) _shootSentry.EnterBattle();
             if (_wallSentry != null && !_wallSentry.IsKnockedOut) _wallSentry.EnterBattle();
 
-            // ⑤ 적 소환 시작
+            // ③ 지속 소환 시작 (낙하 연출로 소환된 초기 적과 별개로 추가 소환)
+            // SpawnWithDropEffect로 소환된 적은 이미 등록됐으므로
+            // SpawnStart는 필요시 추가 웨이브 소환에 사용합니다.
+            // 인카운터 설계에 따라 비활성화 가능합니다.
             _enemySpawner?.SpawnStart(_currentEncounterData, _playerTransform);
-        }
 
-        // ─────────────────────────────────────────
-        //  센트리 배치
-        // ─────────────────────────────────────────
-
-        private void PlaceSentriesAtBattleStart()
-        {
-            if (_sentryBattleStartPositions == null || _sentryBattleStartPositions.Length < 3)
-            {
-                Debug.LogWarning("[BattleManager] _sentryBattleStartPositions 3개 미만");
-                return;
-            }
-
-            if (_strikeSentry != null) _strikeSentry.EnterBattlePhysics();
-            if (_shootSentry != null) _shootSentry.EnterBattlePhysics();
-            if (_wallSentry != null) _wallSentry.EnterBattlePhysics();
-
-            if (_strikeSentry != null && _sentryBattleStartPositions[0] != null)
-                _strikeSentry.transform.DOMove(_sentryBattleStartPositions[0].position, 0.8f)
-                    .SetEase(Ease.OutBack);
-            if (_shootSentry != null && _sentryBattleStartPositions[1] != null)
-                _shootSentry.transform.DOMove(_sentryBattleStartPositions[1].position, 0.8f)
-                    .SetEase(Ease.OutBack).SetDelay(0.1f);
-            if (_wallSentry != null && _sentryBattleStartPositions[2] != null)
-                _wallSentry.transform.DOMove(_sentryBattleStartPositions[2].position, 0.8f)
-                    .SetEase(Ease.OutBack).SetDelay(0.2f);
-
-            if (_playerBattlePosition != null && _playerTransform != null)
-                _playerTransform.DOMove(_playerBattlePosition.position, 0.6f).SetEase(Ease.OutSine);
+            yield return null;
         }
 
         // ─────────────────────────────────────────
         //  센트리 KO 체크
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// 센트리 KO 시 각 센트리(SentryBase.KnockOut)에서 호출합니다.
-        /// 전원 KO이면 패배 처리합니다.
-        /// </summary>
+        /// <summary>센트리 KO 시 SentryBase.KnockOut()에서 호출합니다.</summary>
         public void OnSentryKnockedOut()
         {
             if (!_isInBattle) return;
@@ -168,6 +156,8 @@ namespace SENTRY
             _enemySpawner?.NotifyEnemyDied();
             DistributeExp(expAmount);
             SentryComboManager.Instance?.OnEnemyKilled();
+
+            Debug.Log($"[BattleManager] 처치 {_currentKillCount}/{_killCountToWin}");
 
             if (_currentKillCount >= _killCountToWin)
                 EndBattle(isVictory: true);
@@ -209,7 +199,7 @@ namespace SENTRY
 
             if (isVictory)
             {
-                Debug.Log("<color=lime>[BattleManager] 배틀 클리어!</color>");
+                Debug.Log("<color=lime>[BattleManager] 클리어!</color>");
                 BattleUIManager.Instance?.ShowVictoryPanel(BuildBattleResult());
             }
             else
@@ -220,7 +210,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  결산 데이터 빌드
+        //  결산 데이터
         // ─────────────────────────────────────────
 
         private BattleResultData BuildBattleResult()
@@ -230,6 +220,7 @@ namespace SENTRY
                 killCount = _currentKillCount,
                 sentryResults = new List<SentryResultData>()
             };
+
             void Add(SentryBase s)
             {
                 if (s == null) return;
@@ -246,18 +237,15 @@ namespace SENTRY
                     isKnockedOut = s.IsKnockedOut
                 });
             }
+
             Add(_strikeSentry); Add(_shootSentry); Add(_wallSentry);
             return result;
         }
 
         // ─────────────────────────────────────────
-        //  결산창 / 패배 패널 버튼 콜백
+        //  결산창/패배 패널 버튼 콜백 (BattleUIManager에서 호출)
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// 결산창 [확인] 또는 패배 패널 [돌아가기] 버튼 클릭 시
-        /// UIManager를 통해 이 메서드가 호출됩니다.
-        /// </summary>
         public void ReturnToFieldFromResult()
         {
             BattleUIManager.Instance?.HideResultPanels();

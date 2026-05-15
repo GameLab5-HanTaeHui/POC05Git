@@ -1,5 +1,6 @@
-﻿using UnityEngine;
+﻿using DG.Tweening;
 using System.Collections;
+using UnityEngine;
 
 namespace SENTRY
 {
@@ -131,13 +132,96 @@ namespace SENTRY
             Debug.Log("[EnemySpawner] 스폰 중단");
         }
 
-        /// <summary>
-        /// 적이 사망했을 때 BattleManager.OnEnemyDied()를 통해 호출됩니다.
-        /// 생존 카운터를 감소시킵니다.
-        /// </summary>
         public void NotifyEnemyDied()
         {
             _aliveEnemyCount = Mathf.Max(0, _aliveEnemyCount - 1);
+        }
+
+        // ─────────────────────────────────────────
+        //  배틀 진입 연출 소환 (FieldManager 연동)
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// FieldManager.BattleSequenceRoutine()에서 yield return으로 호출됩니다.
+        /// 적을 하늘 위에서 낙하시키는 연출로 순서대로 소환합니다.
+        /// 모든 적의 착지가 완료된 후 코루틴을 반환합니다.
+        /// </summary>
+        public IEnumerator SpawnWithDropEffect(BattleEncounterDataSO encounterData)
+        {
+            if (encounterData == null || _spawnPoints == null || _spawnPoints.Length == 0)
+                yield break;
+
+            // BattleField SetActive 직후이므로 이 시점에 반드시 찾을 수 있습니다.
+            _enemyComboManager = EnemyComboManager.Instance
+                                    ?? FindFirstObjectByType<EnemyComboManager>();
+            _enemyBattleUIManager = EnemyBattleUIManager.Instance
+                                    ?? FindFirstObjectByType<EnemyBattleUIManager>();
+
+            _enemyComboManager?.Initialize(encounterData.comboCount);
+
+            _aliveEnemyCount = 0;
+            _totalSpawnedCount = 0;
+
+            const float dropHeight = 8f;    // 하늘 위 낙하 시작 높이 오프셋
+            const float dropDuration = 0.5f;  // 낙하 소요 시간
+            const float stagger = 0.25f; // 적 간 낙하 시작 간격
+
+            float lastDropEnd = 0f;
+
+            foreach (var entry in encounterData.spawnEntries)
+            {
+                if (entry.enemyPrefab == null) continue;
+
+                for (int i = 0; i < entry.count; i++)
+                {
+                    Transform spawnPoint = _spawnPoints[Random.Range(0, _spawnPoints.Length)];
+                    Vector3 landPos = spawnPoint.position;
+                    Vector3 dropStart = landPos + Vector3.up * dropHeight;
+
+                    GameObject newEnemy = Instantiate(
+                        entry.enemyPrefab, dropStart, Quaternion.identity);
+
+                    // 페이크 쿼터뷰 물리 전환
+                    Rigidbody2D rb = newEnemy.GetComponent<Rigidbody2D>();
+                    if (rb != null)
+                    {
+                        rb.gravityScale = 0f;
+                        rb.bodyType = RigidbodyType2D.Kinematic;
+                        rb.linearVelocity = Vector2.zero;
+                    }
+
+                    // 낙하 DOMove — 적마다 stagger 간격으로 순서대로 낙하
+                    float delay = _totalSpawnedCount * stagger;
+                    newEnemy.transform
+                        .DOMove(landPos, dropDuration)
+                        .SetEase(Ease.InQuad)
+                        .SetDelay(delay)
+                        .OnComplete(() =>
+                            newEnemy.transform.DOPunchScale(
+                                new Vector3(0.3f, -0.3f, 0f), 0.25f, 5, 0.5f));
+
+                    lastDropEnd = delay + dropDuration + 0.25f;
+
+                    // Init + ComboManager/UIManager 등록
+                    Enemy enemyScript = newEnemy.GetComponent<Enemy>();
+                    if (enemyScript != null)
+                    {
+                        enemyScript.Init();
+                        _enemyComboManager?.RegisterEnemy(enemyScript);
+                        // EnemyComboManager 없을 경우 직접 등록
+                        if (_enemyComboManager == null)
+                            _enemyBattleUIManager?.RegisterEnemy(enemyScript);
+                    }
+
+                    _aliveEnemyCount++;
+                    _totalSpawnedCount++;
+                }
+            }
+
+            // 마지막 적 착지 + 충격 연출 완료까지 대기
+            yield return new WaitForSeconds(lastDropEnd);
+
+            Debug.Log($"[EnemySpawner] 낙하 소환 완료 ({_totalSpawnedCount}마리)");
         }
 
         // ─────────────────────────────────────────

@@ -62,6 +62,13 @@ namespace SENTRY
         [Tooltip("공격 쿨타임 (초)")]
         [SerializeField] private float _attackCooldown = 1.2f;
 
+        [Header("스킬 게이지")]
+        [Tooltip("기본 공격 1회 시 스킬 게이지 충전량")]
+        [SerializeField] private float _skillGaugePerAttack = 10f;
+
+        [Tooltip("스킬 게이지 최대치")]
+        [SerializeField] private float _maxSkillGauge = 100f;
+
         [Header("타겟 갱신")]
         [Tooltip("타겟 센트리를 재탐색하는 주기 (초)")]
         [SerializeField] private float _targetRefreshInterval = 0.5f;
@@ -118,6 +125,9 @@ namespace SENTRY
         /// <summary>마지막 타겟 재탐색 시각</summary>
         private float _lastTargetRefreshTime;
 
+        /// <summary>현재 스킬 게이지 누적량</summary>
+        private float _currentSkillGauge = 0f;
+
         /// <summary>FixedUpdate에서 사용할 이동 방향 벡터</summary>
         private Vector2 _moveDir = Vector2.zero;
 
@@ -138,6 +148,15 @@ namespace SENTRY
         public int CurrentHp => _currentHp;
         public int MaxHp => _maxHp;
         public int Level => _level;
+
+        /// <summary>현재 스킬 게이지 (EnemyBattleUIManager 표시용)</summary>
+        public float SkillGauge => _currentSkillGauge;
+
+        /// <summary>최대 스킬 게이지 (EnemyBattleUIManager 표시용)</summary>
+        public float MaxSkillGauge => _maxSkillGauge;
+
+        /// <summary>기절 상태 여부 (EnemyBattleUIManager StunIcon 표시용)</summary>
+        public bool IsStunned => _isStunned;
 
         // ─────────────────────────────────────────
         //  초기화
@@ -310,6 +329,9 @@ namespace SENTRY
 
             // 데미지 적용 (이후 센트리가 KO될 수 있음)
             _currentTarget.TakeDamage(_attackDamage);
+
+            // 스킬 게이지 충전
+            _currentSkillGauge = Mathf.Min(_currentSkillGauge + _skillGaugePerAttack, _maxSkillGauge);
 
             // 연출 — null 체크로 NullRef 방지
             if (_currentTarget != null)

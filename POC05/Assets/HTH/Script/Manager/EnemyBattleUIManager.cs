@@ -9,52 +9,38 @@ namespace SENTRY
     /// <summary>
     /// 배틀 필드의 적 캐릭터 HUD를 전담하는 싱글턴 매니저.
     ///
-    /// [구조]
-    /// - EnemySlot1~3은 씬에 항상 활성 상태로 배치합니다.
-    /// - _enemyHudPanel(RectTransform) 전체가 화면 밖에서 슬라이드 인/아웃합니다.
-    /// - 적이 소환될 때 SpawnEntries 순서대로 슬롯에 데이터(이름/레벨/HP)를 채웁니다.
-    /// - SetActive / CanvasGroup alpha 같은 숨김 처리 없음.
+    /// [슬롯 구성]
+    ///   NameText  : 적 이름
+    ///   LevelText : 레벨
+    ///   HpFill    : HP 바 (Image Filled)
+    ///   HpText    : HP 수치 텍스트
+    ///   SkillFill : 스킬 게이지 (Image Filled) — Enemy.SkillGauge / MaxSkillGauge
+    ///   StunIcon  : 기절 상태 아이콘 (기절 중 표시)
+    ///   KoIcon    : KO 아이콘 (사망 시 표시)
     ///
     /// [히어라키 위치]
     /// Canvas
-    ///   └── EnemyHUDPanel       ← _enemyHudPanel (RectTransform, 슬라이드 루트)
-    ///         ├── EnemySlot1    ← 항상 활성
+    ///   └── EnemyHUDPanel
+    ///         ├── EnemySlot1
     ///         │     ├── NameText
     ///         │     ├── LevelText
-    ///         │     ├── HpFill
+    ///         │     ├── HpFill    (Image Filled)
     ///         │     ├── HpText
-    ///         │     └── KoIcon
-    ///         ├── EnemySlot2    ← 항상 활성
-    ///         └── EnemySlot3    ← 항상 활성
+    ///         │     ├── SkillFill (Image Filled)
+    ///         │     ├── StunIcon  (GameObject)
+    ///         │     └── KoIcon    (GameObject)
+    ///         ├── EnemySlot2
+    ///         └── EnemySlot3
     /// </summary>
     public class EnemyBattleUIManager : MonoBehaviour
     {
-        // ─────────────────────────────────────────
-        //  싱글턴
-        // ─────────────────────────────────────────
-
         public static EnemyBattleUIManager Instance { get; private set; }
 
-        // ─────────────────────────────────────────
-        //  Inspector — 슬라이드 패널
-        // ─────────────────────────────────────────
-
         [Header("슬라이드 패널")]
-        [Tooltip("적 HUD 루트 RectTransform.\n" +
-                 "이 오브젝트 전체가 화면 밖 → 안으로 슬라이드합니다.")]
         [SerializeField] private RectTransform _enemyHudPanel;
-
-        [Header("슬라이드 방향")]
-        [Tooltip("true = X축 / false = Y축")]
         [SerializeField] private bool _slideOnX = true;
-
-        [Tooltip("true = 양수 방향 진입 (오른쪽/위) / false = 음수 방향 (왼쪽/아래)")]
         [SerializeField] private bool _slideFromPositive = true;
-
-        [Tooltip("슬라이드 이동 거리 (px)")]
         [SerializeField] private float _slideDistance = 600f;
-
-        [Header("슬라이드 애니메이션")]
         [SerializeField] private float _slideDuration = 0.5f;
         [SerializeField] private Ease _slideInEase = Ease.OutBack;
         [SerializeField] private Ease _slideOutEase = Ease.InBack;
@@ -68,6 +54,8 @@ namespace SENTRY
         [SerializeField] private TMP_Text _enemy1LevelText;
         [SerializeField] private Image _enemy1HpFill;
         [SerializeField] private TMP_Text _enemy1HpText;
+        [SerializeField] private Image _enemy1SkillFill;
+        [SerializeField] private GameObject _enemy1StunIcon;
         [SerializeField] private GameObject _enemy1KoIcon;
 
         // ─────────────────────────────────────────
@@ -79,6 +67,8 @@ namespace SENTRY
         [SerializeField] private TMP_Text _enemy2LevelText;
         [SerializeField] private Image _enemy2HpFill;
         [SerializeField] private TMP_Text _enemy2HpText;
+        [SerializeField] private Image _enemy2SkillFill;
+        [SerializeField] private GameObject _enemy2StunIcon;
         [SerializeField] private GameObject _enemy2KoIcon;
 
         // ─────────────────────────────────────────
@@ -90,6 +80,8 @@ namespace SENTRY
         [SerializeField] private TMP_Text _enemy3LevelText;
         [SerializeField] private Image _enemy3HpFill;
         [SerializeField] private TMP_Text _enemy3HpText;
+        [SerializeField] private Image _enemy3SkillFill;
+        [SerializeField] private GameObject _enemy3StunIcon;
         [SerializeField] private GameObject _enemy3KoIcon;
 
         [Header("갱신 설정")]
@@ -278,7 +270,7 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  HP 주기 갱신
+        //  HUD 주기 갱신
         // ─────────────────────────────────────────
 
         private IEnumerator HudRefreshRoutine()
@@ -289,6 +281,8 @@ namespace SENTRY
                 {
                     if (_enemies[i] == null || _enemies[i].IsDead) continue;
                     RefreshSlotHp(i);
+                    RefreshSlotSkill(i);
+                    RefreshSlotStun(i);
                 }
                 yield return new WaitForSeconds(_hudRefreshRate);
             }
@@ -300,6 +294,21 @@ namespace SENTRY
             if (e == null) return;
             float ratio = e.MaxHp > 0 ? (float)e.CurrentHp / e.MaxHp : 0f;
             SetHpFill(i, ratio, e.CurrentHp, e.MaxHp);
+        }
+
+        private void RefreshSlotSkill(int i)
+        {
+            Enemy e = _enemies[i];
+            if (e == null) return;
+            float ratio = e.MaxSkillGauge > 0 ? e.SkillGauge / e.MaxSkillGauge : 0f;
+            SetSkillFill(i, ratio);
+        }
+
+        private void RefreshSlotStun(int i)
+        {
+            Enemy e = _enemies[i];
+            if (e == null) return;
+            SetStunIcon(i, e.IsStunned);
         }
 
         // ─────────────────────────────────────────
@@ -322,9 +331,20 @@ namespace SENTRY
         {
             Image fill = i switch { 0 => _enemy1HpFill, 1 => _enemy2HpFill, 2 => _enemy3HpFill, _ => null };
             TMP_Text txt = i switch { 0 => _enemy1HpText, 1 => _enemy2HpText, 2 => _enemy3HpText, _ => null };
-
             if (fill != null) fill.fillAmount = ratio;
             if (txt != null) txt.text = max > 0 ? $"{current}/{max}" : string.Empty;
+        }
+
+        private void SetSkillFill(int i, float ratio)
+        {
+            Image fill = i switch { 0 => _enemy1SkillFill, 1 => _enemy2SkillFill, 2 => _enemy3SkillFill, _ => null };
+            if (fill != null) fill.fillAmount = ratio;
+        }
+
+        private void SetStunIcon(int i, bool active)
+        {
+            GameObject icon = i switch { 0 => _enemy1StunIcon, 1 => _enemy2StunIcon, 2 => _enemy3StunIcon, _ => null };
+            if (icon != null) icon.SetActive(active);
         }
 
         private void SetKoIcon(int i, bool active)
