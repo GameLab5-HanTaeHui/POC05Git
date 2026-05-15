@@ -5596,7 +5596,7 @@ MonoBehaviour:
   _fadePanel: {fileID: 1207656420}
   _countdownDuration: 3
   _playerController: {fileID: 1432970194}
-  _battleCharacterRotationX: 50
+  _battleCharacterRotationX: -50
 --- !u!4 &516934342
 Transform:
   m_ObjectHideFlags: 0
@@ -6921,7 +6921,7 @@ MonoBehaviour:
   _wallSentry: {fileID: 1955320326}
   _wallLayer:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 3145728
   _sentryRadius: 0.4
   _enemyRadius: 0.4
   _maxComboGauge: 100
@@ -13280,21 +13280,21 @@ MonoBehaviour:
   _enemy1LevelText: {fileID: 1658554412}
   _enemy1HpFill: {fileID: 7395642}
   _enemy1HpText: {fileID: 1299554210}
-  _enemy1SkillFill: {fileID: 0}
+  _enemy1SkillFill: {fileID: 149982566}
   _enemy1StunIcon: {fileID: 0}
   _enemy1KoIcon: {fileID: 324040616}
   _enemy2NameText: {fileID: 256458709}
   _enemy2LevelText: {fileID: 557649435}
   _enemy2HpFill: {fileID: 656450469}
   _enemy2HpText: {fileID: 1647383893}
-  _enemy2SkillFill: {fileID: 0}
+  _enemy2SkillFill: {fileID: 1940558043}
   _enemy2StunIcon: {fileID: 0}
   _enemy2KoIcon: {fileID: 1129167363}
   _enemy3NameText: {fileID: 748851184}
   _enemy3LevelText: {fileID: 992088002}
   _enemy3HpFill: {fileID: 2112162904}
   _enemy3HpText: {fileID: 579391713}
-  _enemy3SkillFill: {fileID: 0}
+  _enemy3SkillFill: {fileID: 888998497}
   _enemy3StunIcon: {fileID: 0}
   _enemy3KoIcon: {fileID: 1220717775}
   _hudRefreshRate: 0.1
@@ -20510,7 +20510,7 @@ MonoBehaviour:
   - {fileID: 1897868181}
   - {fileID: 1968841714}
   - {fileID: 1511100552}
-  _enemyRotationX: 50
+  _enemyRotationX: -50
 --- !u!1 &1486670094
 GameObject:
   m_ObjectHideFlags: 0
@@ -21008,8 +21008,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1556268571}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.34202018, y: -0.0000006440876, z: -0.0000002344289, w: 0.9396926}
-  m_LocalPosition: {x: 0, y: 6.4278865, z: -71.66045}
+  m_LocalRotation: {x: -0.42261836, y: 0.00000023274428, z: 0.00000049912205, w: 0.90630776}
+  m_LocalPosition: {x: 0, y: -71.660446, z: -6.427876}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -24200,7 +24200,7 @@ MonoBehaviour:
     m_Bits: 8192
   _wallLayer:
     serializedVersion: 2
-    m_Bits: 2097152
+    m_Bits: 3145728
   _maxSkillGauge: 100
   _skillGaugePerAttack: 20
   _stunDuration: 2.5
@@ -25359,7 +25359,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2095877512}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -25369,7 +25369,7 @@ Transform:
   - {fileID: 1011596682}
   - {fileID: 367454058}
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2104924041
 GameObject:
   m_ObjectHideFlags: 0

@@ -71,10 +71,6 @@ namespace SENTRY
                  "TilemapCollider가 있는 레이어를 설정하세요 (보통 Ground 또는 Wall).")]
         [SerializeField] private LayerMask _wallLayer;
 
-        [Header("페이크 쿼터뷰 설정")]
-        [Tooltip("Y 위치 기반 SortingOrder 갱신 배율")]
-        [SerializeField] private float _sortingOrderScale = 10f;
-
         [Header("피격 넉백 설정")]
         [Tooltip("Strike 피격 시 밀려나는 거리")]
         [SerializeField] private float _strikeKnockDistance = 1.2f;
@@ -105,6 +101,8 @@ namespace SENTRY
         private bool _shouldMove = false;
         private Rigidbody2D _rigid2D;
         private SpriteRenderer _spriteRenderer;
+
+        private Color _originColor;
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
@@ -166,6 +164,7 @@ namespace SENTRY
         private void Start()
         {
             _currentHp = _maxHp;
+            _originColor = _spriteRenderer.color;
         }
 
         private void Update()
@@ -175,10 +174,6 @@ namespace SENTRY
                 _shouldMove = false;
                 return;
             }
-
-            if (_spriteRenderer != null)
-                _spriteRenderer.sortingOrder =
-                    Mathf.RoundToInt(-transform.position.y * _sortingOrderScale);
 
             if (Time.time >= _lastTargetRefreshTime + _targetRefreshInterval)
             {
@@ -321,7 +316,7 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = Color.white;
+                            _spriteRenderer.color = _originColor;
                     });
 
             // ── 넉백 — BattlePhysicsHelper로 벽 충돌 보정 후 DOMove ──
@@ -372,7 +367,7 @@ namespace SENTRY
             _isStunned = false;
 
             if (_spriteRenderer != null && !_isDead)
-                _spriteRenderer.DOColor(Color.white, 0.15f);
+                _spriteRenderer.DOColor(_originColor, 0.15f);
 
             Debug.Log($"[{name}] 기절 해제");
         }

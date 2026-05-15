@@ -75,10 +75,6 @@ namespace SENTRY
         [Tooltip("피격 / 무적 / 과부화 / 회복 연출용 SpriteRenderer")]
         [SerializeField] private SpriteRenderer _spriteRenderer;
 
-        [Header("페이크 쿼터뷰 (배틀 필드)")]
-        [Tooltip("Y 위치 기반 SortingOrder 갱신 배율. 기본값 10.")]
-        [SerializeField] private float _sortingOrderScale = 10f;
-
         // ─────────────────────────────────────────
         //  레이어 이름 상수
         // ─────────────────────────────────────────
@@ -152,13 +148,6 @@ namespace SENTRY
         {
             if (!IsKnockedOut && _playerTransform != null && _isFollowing)
                 FollowPlayer();
-
-            // 배틀 필드에 있는 동안 Y 위치 기반 SortingOrder 갱신
-            // _isInBattleField은 SetupForBattle()에서 true가 되므로
-            // EnterBattlePhysics() 이전 DOMove 등장 연출 중에도 정렬이 적용됩니다.
-            if (_isInBattleField && _spriteRenderer != null)
-                _spriteRenderer.sortingOrder =
-                    Mathf.RoundToInt(-transform.position.y * _sortingOrderScale);
         }
 
         // ─────────────────────────────────────────

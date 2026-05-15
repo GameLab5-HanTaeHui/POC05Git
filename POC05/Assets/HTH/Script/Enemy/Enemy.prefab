@@ -85,7 +85,7 @@ SpriteRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
-  m_Color: {r: 0.20401445, g: 0.2735849, b: 0.20260769, a: 1}
+  m_Color: {r: 0.12615702, g: 0.5943396, b: 0.12615702, a: 1}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
@@ -195,7 +195,7 @@ MonoBehaviour:
     m_Bits: 1024
   _wallLayer:
     serializedVersion: 2
-    m_Bits: 2097152
+    m_Bits: 3145728
   _sortingOrderScale: -50
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4
