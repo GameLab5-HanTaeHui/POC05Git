@@ -101,6 +101,8 @@ namespace SENTRY
         private float _savedGravityScale = 1f;
         private bool _isBattlePhysics = false;
 
+        private Color _originColor;
+
         /// <summary>
         /// 배틀 필드 활성 여부.
         /// true이면 SortingOrder를 Y 위치 기반으로 매 프레임 갱신합니다.
@@ -143,6 +145,7 @@ namespace SENTRY
             _rb = GetComponent<Rigidbody2D>();
             if (_rb != null) _savedGravityScale = _rb.gravityScale;
             _currentHp = _maxHp;
+            _originColor = _spriteRenderer.color;
         }
 
         private void Update()
@@ -301,7 +304,7 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = IsOverloaded ? Color.red : Color.white;
+                            _spriteRenderer.color = IsOverloaded ? Color.red : _originColor;
                     });
 
             if (_currentHp <= 0) KnockOut();
@@ -318,7 +321,7 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = IsOverloaded ? Color.red : Color.white;
+                            _spriteRenderer.color = IsOverloaded ? Color.red : _originColor;
                     });
         }
 
@@ -334,7 +337,7 @@ namespace SENTRY
 
             transform.localScale = Vector3.zero;
             transform.DOScale(Vector3.one, 0.4f).SetEase(Ease.OutBack);
-            if (_spriteRenderer != null) _spriteRenderer.color = Color.white;
+            if (_spriteRenderer != null) _spriteRenderer.color = _originColor;
         }
 
         // ─────────────────────────────────────────
@@ -393,7 +396,7 @@ namespace SENTRY
             else
             {
                 _spriteRenderer.DOKill();
-                _spriteRenderer.color = IsOverloaded ? Color.red : Color.white;
+                _spriteRenderer.color = IsOverloaded ? Color.red : _originColor;
             }
         }
 
@@ -407,7 +410,7 @@ namespace SENTRY
             OverloadDamageMultiplier = on ? damageMult : 1f;
             OverloadSpeedMultiplier = on ? speedMult : 1f;
             if (_spriteRenderer != null)
-                _spriteRenderer.color = on ? Color.red : Color.white;
+                _spriteRenderer.color = on ? Color.red : _originColor;
         }
 
         // ─────────────────────────────────────────
@@ -439,7 +442,7 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = Color.white;
+                            _spriteRenderer.color = _originColor;
                     });
 
             BattleUIManager.Instance?.PlayLevelUpEffect(_sentryName, _currentLevel);

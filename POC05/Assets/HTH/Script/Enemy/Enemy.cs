@@ -7,22 +7,16 @@ namespace SENTRY
     /// <summary>
     /// 배틀 필드에서 등장하는 적 캐릭터.
     ///
-    /// [버그 수정 — 선택창 전 AI 선행 실행]
-    /// _isBattleStarted 플래그를 추가했습니다.
-    /// SpawnWithDropEffect()로 소환된 직후에는 false 상태로 AI가 완전히 정지합니다.
-    /// BattleManager.StartBattle() → BattleStartRoutine() 내부에서
-    /// ActivateBattleAI()를 호출해야 비로소 이동·공격이 시작됩니다.
+    /// [버그 수정 — TilemapCollider 뚫림]
+    /// TakeDamage()의 넉백 DOMove에 BattlePhysicsHelper.GetSafeTarget()을 적용했습니다.
+    /// 넉백 목표 위치를 CircleCast로 검증해 벽에 막히면 직전 위치로 클램핑합니다.
     ///
-    /// [히어라키 위치]
-    /// BattleField
-    ///   └── Enemy (프리팹 — EnemySpawner가 동적 생성)
-    ///         ├── Enemy (이 스크립트)
-    ///         ├── Rigidbody2D  (gravityScale=0, Kinematic)
-    ///         ├── Collider2D
-    ///         └── SpriteRenderer
+    /// [Inspector 추가 필드]
+    /// _wallLayer — TilemapCollider가 있는 레이어 설정 (보통 "Ground" 또는 "Wall")
+    /// _colliderRadius — 넉백 CircleCast 반경 (기본 0.4f)
     /// </summary>
 
-    /// <summary>피격 타입 열거형</summary>
+    /// <summary>피격 타입. Strike = 강한 넉백, Shoot = 약한 밀림</summary>
     public enum HitType { Strike, Shoot }
 
     public class Enemy : MonoBehaviour
@@ -32,11 +26,11 @@ namespace SENTRY
         // ─────────────────────────────────────────
 
         [Header("기본 스탯")]
+        [Tooltip("레벨 (EnemyBattleUIManager 표시용)")]
+        [SerializeField] private int _level = 0;
+
         [Tooltip("최대 체력")]
         [SerializeField] private int _maxHp = 100;
-
-        [Tooltip("적 레벨. EnemyBattleUIManager 레벨 텍스트에 표시됩니다.")]
-        [SerializeField] private int _level = 1;
 
         [Tooltip("이동 속도 (MovePosition 기반 — units/sec)")]
         [SerializeField] private float _moveSpeed = 2.5f;
@@ -55,23 +49,27 @@ namespace SENTRY
         [SerializeField] private float _attackCooldown = 1.2f;
 
         [Header("스킬 게이지")]
-        [Tooltip("최대 스킬 게이지")]
-        [SerializeField] private float _maxSkillGauge = 100f;
+        [Tooltip("기본 공격 1회 시 스킬 게이지 충전량")]
+        [SerializeField] private float _skillGaugePerAttack = 10f;
 
-        [Tooltip("공격 1회당 스킬 게이지 충전량")]
-        [SerializeField] private float _skillGaugePerAttack = 20f;
+        [Tooltip("스킬 게이지 최대치")]
+        [SerializeField] private float _maxSkillGauge = 100f;
 
         [Header("타겟 갱신")]
         [Tooltip("타겟 센트리를 재탐색하는 주기 (초)")]
         [SerializeField] private float _targetRefreshInterval = 0.5f;
 
-        [Header("센트리 레이어")]
-        [Tooltip("SentryLive 레이어로 설정하세요.")]
+        [Header("경험치 설정")]
+        [Tooltip("사망 시 센트리들에게 분배할 경험치 양")]
+        [SerializeField] private int _expOnDeath = 30;
+
+        [Header("레이어 설정")]
+        [Tooltip("탐색할 센트리 레이어. SentryLive를 설정하세요.")]
         [SerializeField] private LayerMask _sentryLayer;
 
-        [Header("경험치 설정")]
-        [Tooltip("사망 시 센트리들에게 분배할 경험치")]
-        [SerializeField] private int _expOnDeath = 30;
+        [Tooltip("넉백 CircleCast 충돌 검사 레이어.\n" +
+                 "TilemapCollider가 있는 레이어를 설정하세요 (보통 Ground 또는 Wall).")]
+        [SerializeField] private LayerMask _wallLayer;
 
         [Header("페이크 쿼터뷰 설정")]
         [Tooltip("Y 위치 기반 SortingOrder 갱신 배율")]
@@ -87,110 +85,61 @@ namespace SENTRY
         [Tooltip("넉백 이동 소요 시간 (초)")]
         [SerializeField] private float _knockDuration = 0.18f;
 
+        [Tooltip("넉백 CircleCast 반경. 캐릭터 콜라이더 반경과 맞추세요.")]
+        [SerializeField] private float _colliderRadius = 0.4f;
+
         // ─────────────────────────────────────────
         //  내부 상태 변수
         // ─────────────────────────────────────────
 
-        /// <summary>현재 추격 중인 센트리</summary>
         private SentryBase _currentTarget;
-
-        /// <summary>현재 HP</summary>
         private int _currentHp;
-
-        /// <summary>사망 여부 (중복 Die() 방지)</summary>
         private bool _isDead = false;
-
-        /// <summary>기절 여부 — true이면 이동·공격 AI 정지</summary>
         private bool _isStunned = false;
-
-        /// <summary>
-        /// 전투 AI 활성화 여부.
-        ///
-        /// [중요] 소환 직후 기본값은 false입니다.
-        /// 낙하 연출 → 선택창 대기 구간에서 적이 움직이지 않도록 합니다.
-        /// BattleManager.BattleStartRoutine()에서 ActivateBattleAI()를 호출해야
-        /// 비로소 이동·공격 AI가 활성화됩니다.
-        /// </summary>
         private bool _isBattleStarted = false;
-
-        /// <summary>
-        /// 콤보 순번 권한 여부.
-        /// EnemyComboManager.SetComboTurn()으로 설정됩니다.
-        /// 단독 모드이면 항상 true로 동작합니다.
-        /// </summary>
         private bool _isMyTurn = true;
-
-        /// <summary>마지막 공격 시각</summary>
         private float _lastAttackTime;
-
-        /// <summary>마지막 타겟 재탐색 시각</summary>
         private float _lastTargetRefreshTime;
-
-        /// <summary>현재 스킬 게이지 누적량</summary>
         private float _currentSkillGauge = 0f;
-
-        /// <summary>FixedUpdate에서 사용할 이동 방향 벡터</summary>
         private Vector2 _moveDir = Vector2.zero;
-
-        /// <summary>이번 FixedUpdate에서 이동 여부</summary>
         private bool _shouldMove = false;
-
-        /// <summary>Rigidbody2D 캐시 (MovePosition 이동)</summary>
         private Rigidbody2D _rigid2D;
-
-        /// <summary>SpriteRenderer 캐시 (방향 플립 + SortingOrder)</summary>
         private SpriteRenderer _spriteRenderer;
+        private Color _originColor;
 
         // ─────────────────────────────────────────
         //  외부 공개 프로퍼티
         // ─────────────────────────────────────────
 
-        /// <summary>사망 여부</summary>
         public bool IsDead => _isDead;
-
-        /// <summary>현재 HP</summary>
         public int CurrentHp => _currentHp;
-
-        /// <summary>최대 HP (EnemyBattleUIManager HP 바 계산용)</summary>
         public int MaxHp => _maxHp;
-
-        /// <summary>적 레벨 (EnemyBattleUIManager 레벨 텍스트 표시용)</summary>
         public int Level => _level;
-
-        /// <summary>현재 스킬 게이지 (EnemyBattleUIManager 표시용)</summary>
         public float SkillGauge => _currentSkillGauge;
-
-        /// <summary>최대 스킬 게이지 (EnemyBattleUIManager 표시용)</summary>
         public float MaxSkillGauge => _maxSkillGauge;
-
-        /// <summary>기절 상태 여부 (EnemyBattleUIManager StunIcon 표시용)</summary>
         public bool IsStunned => _isStunned;
 
         // ─────────────────────────────────────────
         //  초기화
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// EnemySpawner가 생성 직후 호출합니다.
-        /// _isBattleStarted는 false로 초기화되어 AI가 정지 상태로 시작합니다.
-        /// </summary>
+        /// <summary>EnemySpawner가 생성 직후 호출합니다.</summary>
         public void Init(Transform ignored = null)
         {
             _currentTarget = null;
             _lastTargetRefreshTime = 0f;
             _isMyTurn = true;
-            _isBattleStarted = false; // AI 비활성 상태로 시작
+            _isBattleStarted = false;
             _shouldMove = false;
         }
 
         // ─────────────────────────────────────────
-        //  전투 AI 활성화 (BattleManager 연동)
+        //  전투 AI 활성화
         // ─────────────────────────────────────────
 
         /// <summary>
-        /// 적 전투 AI를 활성화합니다.
-        /// [전투하기] 선택 → 카운트다운 완료 → BattleManager.BattleStartRoutine()에서 호출합니다.
-        /// 이 메서드 호출 이후부터 이동·공격 AI가 실행됩니다.
+        /// BattleManager.BattleStartRoutine()에서 호출합니다.
+        /// 이 메서드 이후부터 이동·공격 AI가 활성화됩니다.
         /// </summary>
         public void ActivateBattleAI()
         {
@@ -199,17 +148,11 @@ namespace SENTRY
         }
 
         // ─────────────────────────────────────────
-        //  콤보 순번 제어 (EnemyComboManager 연동)
+        //  콤보 순번 제어
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// EnemyComboManager가 공격 순번을 설정합니다.
-        /// isMyTurn = false 이면 TryAttack()을 건너뜁니다.
-        /// </summary>
-        public void SetComboTurn(bool isMyTurn)
-        {
-            _isMyTurn = isMyTurn;
-        }
+        /// <summary>EnemyComboManager가 공격 순번을 설정합니다.</summary>
+        public void SetComboTurn(bool isMyTurn) => _isMyTurn = isMyTurn;
 
         // ─────────────────────────────────────────
         //  유니티 생명주기
@@ -224,38 +167,31 @@ namespace SENTRY
         private void Start()
         {
             _currentHp = _maxHp;
+            _originColor = _spriteRenderer.color;
         }
 
         private void Update()
         {
-            // _isBattleStarted = false : 낙하 연출 / 선택창 대기 구간 — AI 완전 정지
             if (_isDead || _isStunned || !_isBattleStarted)
             {
                 _shouldMove = false;
                 return;
             }
 
-            // Y 기반 SortingOrder 갱신 (페이크 쿼터뷰 깊이 정렬)
             if (_spriteRenderer != null)
                 _spriteRenderer.sortingOrder =
                     Mathf.RoundToInt(-transform.position.y * _sortingOrderScale);
 
-            // 주기적 타겟 재탐색
             if (Time.time >= _lastTargetRefreshTime + _targetRefreshInterval)
             {
                 _lastTargetRefreshTime = Time.time;
                 FindTarget();
             }
 
-            // 현재 타겟 유효성 검사
             if (_currentTarget == null || _currentTarget.IsKnockedOut)
             {
                 FindTarget();
-                if (_currentTarget == null)
-                {
-                    _shouldMove = false;
-                    return;
-                }
+                if (_currentTarget == null) { _shouldMove = false; return; }
             }
 
             HandleBattleAI();
@@ -263,7 +199,6 @@ namespace SENTRY
 
         private void FixedUpdate()
         {
-            // _isBattleStarted = false이면 MovePosition도 실행하지 않습니다.
             if (_isDead || _isStunned || !_shouldMove || !_isBattleStarted) return;
             if (_rigid2D != null)
                 _rigid2D.MovePosition(
@@ -274,10 +209,6 @@ namespace SENTRY
         //  타겟 탐색
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// SentryLive 레이어 내 가장 가까운 센트리를 타겟으로 설정합니다.
-        /// KO 상태인 센트리는 제외합니다.
-        /// </summary>
         private void FindTarget()
         {
             Collider2D[] hits = Physics2D.OverlapCircleAll(
@@ -303,7 +234,6 @@ namespace SENTRY
         //  전투 AI
         // ─────────────────────────────────────────
 
-        /// <summary>타겟 추격 및 공격 범위 내 공격 시도.</summary>
         private void HandleBattleAI()
         {
             if (_currentTarget == null) { _shouldMove = false; return; }
@@ -332,15 +262,10 @@ namespace SENTRY
         //  기본 공격
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// 타겟 센트리에게 데미지를 입힙니다.
-        /// 콤보 순번이 아니면 건너뜁니다 (단독 모드 제외).
-        /// </summary>
         private void TryAttack()
         {
             if (Time.time < _lastAttackTime + _attackCooldown) return;
 
-            // 콤보 순번 체크
             if (EnemyComboManager.Instance != null &&
                 !EnemyComboManager.Instance.IsSingleMode() &&
                 !_isMyTurn)
@@ -353,14 +278,11 @@ namespace SENTRY
             }
 
             _lastAttackTime = Time.time;
-
             _currentTarget.TakeDamage(_attackDamage);
 
-            // 스킬 게이지 충전
             _currentSkillGauge = Mathf.Min(
                 _currentSkillGauge + _skillGaugePerAttack, _maxSkillGauge);
 
-            // 공격 방향 연출
             if (_currentTarget != null)
             {
                 Vector3 punchDir =
@@ -380,11 +302,12 @@ namespace SENTRY
 
         /// <summary>
         /// 센트리 공격을 받았을 때 호출됩니다.
-        /// HP 변경 후 EnemyBattleUIManager에 갱신을 알립니다.
+        ///
+        /// [버그 수정 — TilemapCollider 뚫림]
+        /// 넉백 DOMove 전에 BattlePhysicsHelper.GetSafeTarget()으로
+        /// 이동 경로 상의 벽 충돌을 CircleCast로 검사합니다.
+        /// 충돌이 있으면 벽 직전 위치로 클램핑해서 DOMove를 실행합니다.
         /// </summary>
-        /// <param name="damage">입힐 데미지</param>
-        /// <param name="hitType">피격 타입 (Strike / Shoot)</param>
-        /// <param name="hitSourcePos">공격 발원 위치 (넉백 방향 계산용)</param>
         public void TakeDamage(int damage, HitType hitType, Vector3 hitSourcePos)
         {
             if (_isDead || _isStunned) return;
@@ -400,10 +323,10 @@ namespace SENTRY
                     .OnComplete(() =>
                     {
                         if (_spriteRenderer != null)
-                            _spriteRenderer.color = Color.white;
+                            _spriteRenderer.color = _originColor;
                     });
 
-            // 넉백 — DOMove (Kinematic 안전)
+            // ── 넉백 — BattlePhysicsHelper로 벽 충돌 보정 후 DOMove ──
             float knockDist = hitType == HitType.Strike
                 ? _strikeKnockDistance
                 : _shootKnockDistance;
@@ -411,24 +334,27 @@ namespace SENTRY
             if (knockDist > 0f)
             {
                 Vector3 knockDir = (transform.position - hitSourcePos).normalized;
-                Vector3 knockTarget = transform.position + knockDir * knockDist;
-                transform.DOMove(knockTarget, _knockDuration).SetEase(Ease.OutQuart);
+                Vector3 rawTarget = transform.position + knockDir * knockDist;
+
+                // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
+                Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
+                    from: transform.position,
+                    to: rawTarget,
+                    radius: _colliderRadius,
+                    wallLayer: _wallLayer);
+
+                transform.DOMove(safeTarget, _knockDuration).SetEase(Ease.OutQuart);
             }
 
-            // HP 변경을 EnemyBattleUIManager에 통보
             EnemyBattleUIManager.Instance?.OnHpChanged(this);
 
             if (_currentHp <= 0) Die();
         }
 
         // ─────────────────────────────────────────
-        //  기절 (WallSentry 스킬 연동)
+        //  기절
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// WallSentry 스킬로 적을 기절시킵니다.
-        /// duration초 후 자동 해제됩니다.
-        /// </summary>
         public void Stun(float duration)
         {
             if (_isDead) return;
@@ -448,32 +374,24 @@ namespace SENTRY
             _isStunned = false;
 
             if (_spriteRenderer != null && !_isDead)
-                _spriteRenderer.DOColor(Color.white, 0.15f);
+                _spriteRenderer.DOColor(_originColor, 0.15f);
 
             Debug.Log($"[{name}] 기절 해제");
         }
 
         // ─────────────────────────────────────────
-        //  사망 처리
+        //  사망
         // ─────────────────────────────────────────
 
-        /// <summary>
-        /// HP가 0이 되면 호출됩니다.
-        /// 콤보 순번 정리 → 킬 카운트 + 경험치 → 사망 연출 → Destroy
-        /// </summary>
         private void Die()
         {
             if (_isDead) return;
             _isDead = true;
             _shouldMove = false;
 
-            // 콤보 순번 정리 + KO 아이콘 표시
             EnemyComboManager.Instance?.OnEnemyDied(this);
-
-            // 킬 카운트 + 경험치 분배
             BattleManager.Instance?.OnEnemyDied(_expOnDeath);
 
-            // 사망 연출 → 파괴
             transform.DOKill();
             transform.DOScale(Vector3.zero, 0.3f)
                 .SetEase(Ease.InBack)

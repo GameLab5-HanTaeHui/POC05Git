@@ -6,30 +6,47 @@ namespace SENTRY
     /// <summary>
     /// 벽(방어/압박) 센트리.
     ///
-    /// [담당 영역 — 전투 정보만]
-    ///   밀치기 데미지 / 범위 / 쿨타임 / 접근 속도 / 스킬 게이지
-    ///   기본 정보(이름, HP, 레벨, EXP, 추종 설정)는 SentryBase에 있습니다.
+    /// [버그 수정 — TilemapCollider 뚫림]
+    /// TryPush(), UseSkill(), FallbackSkill() 의 DOMove 호출에
+    /// BattlePhysicsHelper.GetSafeTarget()을 적용했습니다.
+    /// 밀치기 목표 위치를 CircleCast로 검증해 벽에 막히면 직전 위치로 클램핑합니다.
     ///
-    /// [레이어 기반 탐색]
-    ///   FindTarget()에서 EnemyLive 레이어만 탐색합니다.
+    /// [Inspector 추가 필드]
+    /// _wallLayer     — TilemapCollider가 있는 레이어 (보통 Ground 또는 Wall)
+    /// _enemyRadius   — 적 콜라이더 반경 (CircleCast 크기, 기본 0.4f)
     /// </summary>
     public class WallSentry : SentryBase
     {
         // ─────────────────────────────────────────
-        //  Inspector 노출 필드 — 전투 정보 전담
+        //  Inspector 노출 필드
         // ─────────────────────────────────────────
 
         [Header("방어 / 밀치기 설정")]
+        [Tooltip("기본 밀치기 데미지")]
         [SerializeField] private int _pushDamage = 15;
+
+        [Tooltip("적 탐지 / 밀치기 유효 범위")]
         [SerializeField] private float _blockRange = 2.5f;
+
+        [Tooltip("기본 공격 쿨타임 (초)")]
         [SerializeField] private float _attackCooldown = 2f;
+
+        [Tooltip("기본 밀치기 거리")]
         [SerializeField] private float _pushDistance = 2.5f;
+
+        [Tooltip("밀치기 DOMove 소요 시간 (초)")]
         [SerializeField] private float _pushDuration = 0.25f;
+
+        [Tooltip("적에게 접근하는 속도")]
         [SerializeField] private float _approachSpeed = 2f;
 
         [Header("레이어 설정")]
         [Tooltip("탐색할 적 레이어. EnemyLive를 설정하세요.")]
         [SerializeField] private LayerMask _enemyLayer;
+
+        [Tooltip("밀치기 CircleCast 충돌 검사 레이어.\n" +
+                 "TilemapCollider가 있는 레이어를 설정하세요 (보통 Ground 또는 Wall).")]
+        [SerializeField] private LayerMask _wallLayer;
 
         [Header("스킬 설정")]
         [SerializeField] private float _maxSkillGauge = 100f;
@@ -37,6 +54,10 @@ namespace SENTRY
         [SerializeField] private float _stunDuration = 2.5f;
         [SerializeField] private float _skillDamageMultiplier = 2.5f;
         [SerializeField] private float _skillPushDistMultiplier = 2f;
+
+        [Header("물리 보정 설정")]
+        [Tooltip("밀치기 CircleCast 반경. 적 콜라이더 반경과 맞추세요 (기본 0.4f).")]
+        [SerializeField] private float _enemyRadius = 0.4f;
 
         [Header("컴포넌트 참조")]
         [SerializeField] private SkillEffect_Wall _skillEffect;
@@ -139,7 +160,7 @@ namespace SENTRY
 
             float dist = Vector2.Distance(transform.position, _currentTarget.position);
             Vector2 dir = ((Vector2)_currentTarget.position
-                           - (Vector2)transform.position).normalized;
+                             - (Vector2)transform.position).normalized;
 
             if (dist > 1.0f)
                 BattleMove(dir, _approachSpeed * OverloadSpeedMultiplier);
@@ -157,10 +178,9 @@ namespace SENTRY
         /// <summary>
         /// 밀치기 공격.
         ///
-        /// [타겟 사망 예외처리]
-        ///   TakeDamage 후 적이 KO될 수 있습니다.
-        ///   DOMove는 KO 후에도 실행될 수 있지만 Die()의 DOKill()이 취소합니다.
-        ///   null 체크로 NullRef를 방지합니다.
+        /// [버그 수정 — TilemapCollider 뚫림]
+        /// DOMove 전 BattlePhysicsHelper.GetSafeTarget()으로
+        /// 밀치기 목표 위치가 벽 안으로 들어가지 않도록 클램핑합니다.
         /// </summary>
         private void TryPush()
         {
@@ -177,21 +197,26 @@ namespace SENTRY
 
             _lastAttackTime = Time.time;
 
-            // 데미지 적용 (이 이후 enemy.IsDead가 true가 될 수 있음)
             enemy.TakeDamage(
                 Mathf.RoundToInt(_pushDamage * OverloadDamageMultiplier),
                 HitType.Strike,
                 transform.position);
 
-            // DOMove — 사망 처리 중이어도 실행. Die()의 DOKill()이 중단시킴
             if (!enemy.IsDead && _currentTarget != null)
             {
                 Vector3 pushDir = (_currentTarget.position - transform.position).normalized;
-                Vector3 pushTarget = _currentTarget.position + pushDir * _pushDistance;
-                _currentTarget.DOMove(pushTarget, _pushDuration).SetEase(Ease.OutQuart);
+                Vector3 rawTarget = _currentTarget.position + pushDir * _pushDistance;
+
+                // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
+                Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
+                    from: _currentTarget.position,
+                    to: rawTarget,
+                    radius: _enemyRadius,
+                    wallLayer: _wallLayer);
+
+                _currentTarget.DOMove(safeTarget, _pushDuration).SetEase(Ease.OutQuart);
             }
 
-            // 타격 연출 (자신)
             if (_currentTarget != null)
             {
                 Vector3 punchDir =
@@ -223,6 +248,12 @@ namespace SENTRY
         //  고유 스킬 (강한 밀치기 + 기절)
         // ─────────────────────────────────────────
 
+        /// <summary>
+        /// 스킬 게이지 만참 시 강한 밀치기 + 기절을 발동합니다.
+        ///
+        /// [버그 수정 — TilemapCollider 뚫림]
+        /// onImpact 콜백 내 DOMove에 BattlePhysicsHelper.GetSafeTarget() 적용.
+        /// </summary>
         private void UseSkill()
         {
             if (_currentTarget == null) return;
@@ -248,9 +279,17 @@ namespace SENTRY
 
                     if (!e.IsDead && captured != null)
                     {
-                        Vector3 dir = (captured.position - transform.position).normalized;
-                        Vector3 target = captured.position + dir * pushDist;
-                        captured.DOMove(target, _pushDuration * 0.5f).SetEase(Ease.OutExpo);
+                        Vector3 pushDir = (captured.position - transform.position).normalized;
+                        Vector3 rawTarget = captured.position + pushDir * pushDist;
+
+                        // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
+                        Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
+                            from: captured.position,
+                            to: rawTarget,
+                            radius: _enemyRadius,
+                            wallLayer: _wallLayer);
+
+                        captured.DOMove(safeTarget, _pushDuration * 0.5f).SetEase(Ease.OutExpo);
                     }
 
                     SentryComboManager.Instance?.OnSentrySkillUsed();
@@ -258,20 +297,38 @@ namespace SENTRY
             );
         }
 
+        /// <summary>
+        /// SkillEffect_Wall 컴포넌트가 없을 때 즉시 스킬을 처리합니다.
+        ///
+        /// [버그 수정 — TilemapCollider 뚫림]
+        /// DOMove에 BattlePhysicsHelper.GetSafeTarget() 적용.
+        /// </summary>
         private void FallbackSkill()
         {
             if (_currentTarget == null) return;
+
             int dmg = Mathf.RoundToInt(
                 _pushDamage * _skillDamageMultiplier * OverloadDamageMultiplier);
             Enemy e = _currentTarget.GetComponent<Enemy>();
             if (e == null) return;
+
             e.TakeDamage(dmg, HitType.Strike, transform.position);
             e.Stun(_stunDuration);
+
             if (!e.IsDead)
             {
-                Vector3 dir = (_currentTarget.position - transform.position).normalized;
-                Vector3 target = _currentTarget.position + dir * _pushDistance * _skillPushDistMultiplier;
-                _currentTarget.DOMove(target, _pushDuration).SetEase(Ease.OutExpo);
+                Vector3 pushDir = (_currentTarget.position - transform.position).normalized;
+                Vector3 rawTarget = _currentTarget.position
+                                    + pushDir * _pushDistance * _skillPushDistMultiplier;
+
+                // [버그 수정] CircleCast로 벽 충돌 검사 → 안전한 위치로 클램핑
+                Vector3 safeTarget = BattlePhysicsHelper.GetSafeTarget(
+                    from: _currentTarget.position,
+                    to: rawTarget,
+                    radius: _enemyRadius,
+                    wallLayer: _wallLayer);
+
+                _currentTarget.DOMove(safeTarget, _pushDuration).SetEase(Ease.OutExpo);
             }
         }
 

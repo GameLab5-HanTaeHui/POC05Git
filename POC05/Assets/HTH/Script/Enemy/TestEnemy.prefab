@@ -14,7 +14,7 @@ GameObject:
   - component: {fileID: 3565637739464086196}
   - component: {fileID: 207993757650643554}
   m_Layer: 13
-  m_Name: Enemy
+  m_Name: TestEnemy
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -180,11 +180,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.Enemy
   _level: 1
-  _maxHp: 100
+  _maxHp: 10000
   _moveSpeed: 3
   _detectionRange: 30
   _attackRange: 1.5
-  _attackDamage: 10
+  _attackDamage: 0
   _attackCooldown: 1
   _skillGaugePerAttack: 10
   _maxSkillGauge: 100
