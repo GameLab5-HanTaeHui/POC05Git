@@ -5975,8 +5975,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 519420028}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -10}
+  m_LocalRotation: {x: -0.42261836, y: -0.00000003456981, z: 0.000000016120167, w: 0.90630776}
+  m_LocalPosition: {x: 0, y: -71.660446, z: -6.427876}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -7651,10 +7651,9 @@ GameObject:
   - component: {fileID: 794165722}
   - component: {fileID: 794165728}
   - component: {fileID: 794165727}
-  - component: {fileID: 794165726}
   - component: {fileID: 794165725}
   - component: {fileID: 794165724}
-  m_Layer: 0
+  m_Layer: 10
   m_Name: StrikeSentry
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -7766,7 +7765,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a0dfbc991c033ea4fb2fcdfeb1fae36f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.StrikeSentry
-  _sentryName: Sentry
+  _sentryName: StrikeSentry
   _maxHp: 100
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
@@ -7775,41 +7774,19 @@ MonoBehaviour:
   _followStopDistance: 1.5
   _formationOffset: {x: -1, y: 0}
   _spriteRenderer: {fileID: 794165722}
-  _sortingOrderScale: 10
+  _sortingOrderScale: 50
   _attackDamage: 30
   _attackRange: 1.2
   _attackCooldown: 1.2
   _chaseSpeed: 3.5
   _detectionRange: 8
-  _enemyLayer:
-    serializedVersion: 2
-    m_Bits: 1024
   _maxSkillGauge: 100
   _skillGaugePerAttack: 15
   _skillDamageMultiplier: 2
+  _enemyLayer:
+    serializedVersion: 2
+    m_Bits: 8192
   _skillEffect: {fileID: 794165724}
---- !u!114 &794165726
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 794165721}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4b9d0f8b3809c334c95b2ae92db978e8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.SentryBase
-  _sentryName: Sentry
-  _maxHp: 100
-  _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
-  _baseExpToLevelUp: 100
-  _maxLevel: 10
-  _followSpeed: 4
-  _followStopDistance: 1.5
-  _formationOffset: {x: -1, y: 0}
-  _spriteRenderer: {fileID: 794165722}
-  _sortingOrderScale: 10
 --- !u!61 &794165727
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -16208,10 +16185,9 @@ GameObject:
   - component: {fileID: 1398330202}
   - component: {fileID: 1398330201}
   - component: {fileID: 1398330200}
-  - component: {fileID: 1398330199}
   - component: {fileID: 1398330198}
   - component: {fileID: 1398330197}
-  m_Layer: 0
+  m_Layer: 10
   m_Name: ShootSentry
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -16249,7 +16225,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: feb0a7dd4d9fa764ba3594ba8978a34e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.ShootSentry
-  _sentryName: Sentry
+  _sentryName: ShootSentry
   _maxHp: 70
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
@@ -16263,41 +16239,19 @@ MonoBehaviour:
   _detectionRange: 10
   _preferredDistance: 5
   _attackCooldown: 1.5
+  _repositionSpeed: 2
   _enemyLayer:
     serializedVersion: 2
-    m_Bits: 1024
+    m_Bits: 8192
   _obstacleLayer:
     serializedVersion: 2
     m_Bits: 3145728
-  _repositionSpeed: 2
   _bulletPrefab: {fileID: 8453319382589875619, guid: e761b72b4758c224e9f3302809beb388, type: 3}
   _firePoint: {fileID: 0}
   _maxSkillGauge: 100
   _skillGaugePerAttack: 12
   _skillDamageMultiplier: 1.5
   _skillEffect: {fileID: 1398330197}
---- !u!114 &1398330199
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1398330196}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4b9d0f8b3809c334c95b2ae92db978e8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.SentryBase
-  _sentryName: Sentry
-  _maxHp: 70
-  _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
-  _baseExpToLevelUp: 100
-  _maxLevel: 10
-  _followSpeed: 4
-  _followStopDistance: 1.5
-  _formationOffset: {x: -1, y: 0}
-  _spriteRenderer: {fileID: 1398330203}
-  _sortingOrderScale: 10
 --- !u!120 &1398330200
 LineRenderer:
   serializedVersion: 3
@@ -20878,10 +20832,9 @@ GameObject:
   - component: {fileID: 1955320330}
   - component: {fileID: 1955320329}
   - component: {fileID: 1955320328}
-  - component: {fileID: 1955320327}
   - component: {fileID: 1955320326}
   - component: {fileID: 1955320325}
-  m_Layer: 0
+  m_Layer: 10
   m_Name: WallSentry
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -20920,7 +20873,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc78c4d38777c94790232f4571cb519, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.WallSentry
-  _sentryName: Sentry
+  _sentryName: WallSentry
   _maxHp: 120
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
@@ -20935,38 +20888,16 @@ MonoBehaviour:
   _attackCooldown: 2
   _pushDistance: 2.5
   _pushDuration: 0.25
+  _approachSpeed: 2
   _enemyLayer:
     serializedVersion: 2
-    m_Bits: 1024
-  _approachSpeed: 2
+    m_Bits: 8192
   _maxSkillGauge: 100
   _skillGaugePerAttack: 20
   _stunDuration: 2.5
   _skillDamageMultiplier: 2.5
-  _skillPushDistanceMultiplier: 2
+  _skillPushDistMultiplier: 2
   _skillEffect: {fileID: 1955320325}
---- !u!114 &1955320327
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1955320324}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4b9d0f8b3809c334c95b2ae92db978e8, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.SentryBase
-  _sentryName: Sentry
-  _maxHp: 120
-  _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
-  _baseExpToLevelUp: 100
-  _maxLevel: 10
-  _followSpeed: 4
-  _followStopDistance: 1.5
-  _formationOffset: {x: -1, y: 0}
-  _spriteRenderer: {fileID: 1955320330}
-  _sortingOrderScale: 10
 --- !u!61 &1955320328
 BoxCollider2D:
   m_ObjectHideFlags: 0

@@ -66,6 +66,17 @@ namespace SENTRY
         public int TotalSpawnedCount => _totalSpawnedCount;
 
         // ─────────────────────────────────────────
+        //  내부 캐시 — Instance 의존 제거
+        // ─────────────────────────────────────────
+
+        /// <summary>
+        /// SpawnStart() 시점에 씬에서 직접 찾아 캐싱합니다.
+        /// BattleField 하위의 오브젝트가 비활성이어서 Instance가 null인 경우를 방지합니다.
+        /// </summary>
+        private EnemyComboManager _enemyComboManager;
+        private EnemyBattleUIManager _enemyBattleUIManager;
+
+        // ─────────────────────────────────────────
         //  스폰 제어
         // ─────────────────────────────────────────
 
@@ -73,14 +84,11 @@ namespace SENTRY
         /// 인카운터 데이터를 기반으로 소환을 시작합니다.
         /// BattleManager.StartBattle()에서 호출합니다.
         /// </summary>
-        /// <param name="encounterData">소환할 적 구성 SO</param>
-        /// <param name="player">플레이어 Transform (적 AI 초기화용)</param>
         public void SpawnStart(BattleEncounterDataSO encounterData, Transform player)
         {
             if (encounterData == null)
             {
-                Debug.LogWarning("[EnemySpawner] EncounterData가 없습니다. " +
-                                 "스폰을 시작할 수 없습니다.");
+                Debug.LogWarning("[EnemySpawner] EncounterData가 없습니다.");
                 return;
             }
 
@@ -90,10 +98,25 @@ namespace SENTRY
             _aliveEnemyCount = 0;
             _totalSpawnedCount = 0;
 
+            // ── Instance 대신 씬에서 직접 탐색하여 캐싱 ──
+            // BattleField가 SetActive(true)된 직후 호출되므로
+            // 이 시점에 FindFirstObjectByType으로 반드시 찾을 수 있습니다.
+            _enemyComboManager = EnemyComboManager.Instance
+                                    ?? FindFirstObjectByType<EnemyComboManager>();
+            _enemyBattleUIManager = EnemyBattleUIManager.Instance
+                                    ?? FindFirstObjectByType<EnemyBattleUIManager>();
+
+            if (_enemyComboManager == null)
+                Debug.LogWarning("[EnemySpawner] ★ EnemyComboManager를 찾을 수 없습니다.");
+            if (_enemyBattleUIManager == null)
+                Debug.LogWarning("[EnemySpawner] ★ EnemyBattleUIManager를 찾을 수 없습니다.");
+
+            // 콤보 순번 초기화
+            _enemyComboManager?.Initialize(encounterData.comboCount);
+
             Debug.Log($"[EnemySpawner] 인카운터 시작: {encounterData.encounterName} " +
                       $"/ 총 적 수: {encounterData.GetTotalEnemyCount()}");
 
-            EnemyComboManager.Instance?.Initialize(encounterData.comboCount);
             StartCoroutine(SpawnRoutine());
         }
 
@@ -206,11 +229,23 @@ namespace SENTRY
             if (enemyScript != null)
                 enemyScript.Init(_playerTransform);
 
-            EnemyComboManager.Instance?.RegisterEnemy(enemyScript.GetComponent<Enemy>());
+            // ── EnemyComboManager / EnemyBattleUIManager 직접 참조로 등록 ──
+            // Instance가 null일 경우를 대비해 SpawnStart()에서 캐싱한 참조를 사용합니다.
+            if (enemyScript != null)
+            {
+                _enemyComboManager?.RegisterEnemy(enemyScript);
+
+                // EnemyComboManager를 통하지 않고 직접 등록합니다.
+                // EnemyComboManager.RegisterEnemy()에서 내부적으로 호출하지만
+                // 캐싱 참조가 null일 때를 대비한 이중 안전 처리입니다.
+                if (_enemyComboManager == null)
+                    _enemyBattleUIManager?.RegisterEnemy(enemyScript);
+            }
+
             _aliveEnemyCount++;
             _totalSpawnedCount++;
 
-            Debug.Log($"[EnemySpawner] {prefab.name} 소환 " +
+            Debug.Log($"[EnemySpawner] {prefab.name} 소환 완료 " +
                       $"(생존: {_aliveEnemyCount} / 총 소환: {_totalSpawnedCount})");
         }
 

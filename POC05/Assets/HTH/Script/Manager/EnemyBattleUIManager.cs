@@ -115,13 +115,18 @@ namespace SENTRY
         {
             if (Instance == null) Instance = this;
             else { Destroy(gameObject); return; }
+        }
 
-            // ── 중요: 이 오브젝트는 Managers 루트에 배치하세요 ──
-            // BattleField 하위에 배치하면 씬 시작 시 비활성 상태라
-            // Awake()가 실행되지 않아 Instance가 null이 됩니다.
-            // EnemyHUDPanel은 Canvas 하위에 두고,
-            // 이 오브젝트(EnemyBattleUIManager)는 --- Managers --- 하위에 배치하세요.
-            Debug.Log("[EnemyBattleUIManager] Awake — Instance 초기화 완료");
+        /// <summary>
+        /// BattleField 하위에 배치된 경우 BattleField가 SetActive(true)될 때
+        /// OnEnable()이 호출됩니다.
+        /// Awake()가 씬 시작 시 비활성으로 실행되지 않았더라도
+        /// 이 시점에 Instance를 재설정합니다.
+        /// </summary>
+        private void OnEnable()
+        {
+            if (Instance == null)
+                Instance = this;
         }
 
         private void Start()
@@ -134,7 +139,7 @@ namespace SENTRY
             }
             else
             {
-                Debug.LogWarning("[EnemyBattleUIManager] ★ _enemyHudPanel 미연결 — Inspector 확인 필요");
+                Debug.LogWarning("[EnemyBattleUIManager] ★ _enemyHudPanel 미연결");
             }
 
             SetKoIcon(0, false);
@@ -142,8 +147,6 @@ namespace SENTRY
             SetKoIcon(2, false);
 
             StartCoroutine(HudRefreshRoutine());
-
-            Debug.Log("[EnemyBattleUIManager] Start 완료");
         }
 
         // ─────────────────────────────────────────
@@ -236,6 +239,22 @@ namespace SENTRY
                 SetHpFill(i, 0f, 0, enemy.MaxHp);
 
                 Debug.Log($"[EnemyBattleUI] 슬롯{i + 1} KO: {enemy.name}");
+                return;
+            }
+        }
+
+        /// <summary>
+        /// 적이 피격당해 HP가 변경됐을 때 Enemy.TakeDamage()에서 호출합니다.
+        /// Enemy 자체에 HP UI가 없으므로 이 메서드가 HP 바 갱신을 전담합니다.
+        /// </summary>
+        public void OnHpChanged(Enemy enemy)
+        {
+            if (enemy == null) return;
+
+            for (int i = 0; i < _enemies.Length; i++)
+            {
+                if (_enemies[i] != enemy) continue;
+                RefreshSlotHp(i);
                 return;
             }
         }

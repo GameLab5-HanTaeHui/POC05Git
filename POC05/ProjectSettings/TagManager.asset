@@ -3,7 +3,9 @@
 --- !u!78 &1
 TagManager:
   serializedVersion: 3
-  tags: []
+  tags:
+  - Enemy
+  - Dead
   layers:
   - Default
   - TransparentFX
@@ -15,12 +17,12 @@ TagManager:
   - 
   - 
   - 
-  - Enemy
-  - 
-  - 
-  - 
-  - 
-  - 
+  - SentryLive
+  - SentryDead
+  - SentryCombo
+  - EnemyLive
+  - EnemyDead
+  - EnemyCombo
   - 
   - 
   - 

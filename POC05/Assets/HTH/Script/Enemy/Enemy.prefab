@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 2704885518182244438}
   - component: {fileID: 3565637739464086196}
   - component: {fileID: 207993757650643554}
-  m_Layer: 10
+  m_Layer: 13
   m_Name: Enemy
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -188,11 +188,10 @@ MonoBehaviour:
   _attackCooldown: 1
   _targetRefreshInterval: 0.5
   _expOnDeath: 30
-  _hpFillSprite: {fileID: 0}
-  _hpBarGroup: {fileID: 0}
-  _sortingOrderScale: 10
+  _sentryLayer:
+    serializedVersion: 2
+    m_Bits: 1024
+  _sortingOrderScale: 50
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4
   _knockDuration: 0.18
-  _aliveTag: Enemy
-  _deadTag: Dead
