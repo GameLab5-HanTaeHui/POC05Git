@@ -8237,7 +8237,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.StrikeSentry
   _sentryName: StrikeSentry
-  _maxHp: 100
+  _maxHp: 650
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
   _maxLevel: 10
@@ -14725,65 +14725,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0, y: 0}
---- !u!1 &1180807170
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1180807172}
-  - component: {fileID: 1180807171}
-  m_Layer: 0
-  m_Name: PlayerAbility
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1180807171
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1180807170}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6ab44a5de9c8b0440bcabe66737a71b3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::SENTRY.PlayerAbility
-  _strikeSentry: {fileID: 794165725}
-  _shootSentry: {fileID: 1398330198}
-  _wallSentry: {fileID: 1955320326}
-  _ability1InitialDelay: 10
-  _ability1Cooldown: 15
-  _targetMarkDuration: 8
-  _ability2InitialDelay: 15
-  _ability2Cooldown: 20
-  _repairHealAmount: 50
-  _ability3InitialDelay: 20
-  _ability3Cooldown: 40
-  _overloadDuration: 6
-  _overloadDamageMultiplier: 2.5
-  _overloadSpeedMultiplier: 1.8
-  _debugTimerLog: 0
---- !u!4 &1180807172
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1180807170}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1201288916
 GameObject:
   m_ObjectHideFlags: 0
@@ -20230,7 +20171,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.ShootSentry
   _sentryName: ShootSentry
-  _maxHp: 70
+  _maxHp: 450
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
   _maxLevel: 10
@@ -23830,7 +23771,7 @@ MonoBehaviour:
   _strikeSentry: {fileID: 794165725}
   _shootSentry: {fileID: 1398330198}
   _wallSentry: {fileID: 1955320326}
-  _playerAbility: {fileID: 1180807171}
+  _playerAbility: {fileID: 1432970192}
   _enemySpawner: {fileID: 1447332103}
 --- !u!4 &1797973219
 Transform:
@@ -25050,7 +24991,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.WallSentry
   _sentryName: WallSentry
-  _maxHp: 120
+  _maxHp: 700
   _growthData: {fileID: 11400000, guid: 08547e8192a1aa54aadc0bb866e78e84, type: 2}
   _baseExpToLevelUp: 100
   _maxLevel: 10
@@ -27163,7 +27104,6 @@ SceneRoots:
   - {fileID: 1125200915}
   - {fileID: 1491651716}
   - {fileID: 1112614904}
-  - {fileID: 1180807172}
   - {fileID: 986678733}
   - {fileID: 1609230276}
   - {fileID: 1554607660}

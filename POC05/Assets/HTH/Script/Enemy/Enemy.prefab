@@ -180,7 +180,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SENTRY.Enemy
   _level: 1
-  _maxHp: 100
+  _maxHp: 700
   _moveSpeed: 3
   _detectionRange: 30
   _attackRange: 1.5
@@ -196,7 +196,6 @@ MonoBehaviour:
   _wallLayer:
     serializedVersion: 2
     m_Bits: 3145728
-  _sortingOrderScale: -50
   _strikeKnockDistance: 1.2
   _shootKnockDistance: 0.4
   _knockDuration: 0.18
